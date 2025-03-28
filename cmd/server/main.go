@@ -4,27 +4,54 @@ import (
 	"encoding/binary"
 	"log/slog"
 	"math"
+	"multiplayer/internal/types"
 	"multiplayer/pkg/plaiq"
 	"net"
 	"time"
 )
 
 func main() {
-	game := Game{}
-
-	conn, err := Listen(":3000")
+	udpAddr, err := net.ResolveUDPAddr("udp", ":3000")
 	if err != nil {
-		panic(err)
+		slog.Error("failed to resolve udp address", "error", err)
+		return
 	}
+	udpConn, err := net.ListenUDP("udp", udpAddr)
+	if err != nil {
+		slog.Error("failed to listen on udp", "error", err)
+		return
+	}
+	defer udpConn.Close()
+
+	buf := make([]byte, 1024)
+	var leftover []byte
 
 	for {
-		/* input := conn.ReceiveInput() // play out inputs nicely 1/60s and ack the most recent input
-		game.Update(input)
-		fmt.Print(game.Position)
-		// conn.Broadcast(input.From, game) // send along with an internal frame-index to throw away the old ones */
+		n, _, err := udpConn.ReadFromUDP(buf)
+		if err != nil {
+			slog.Error("failed to read from udp", "error", err)
+			continue
+		}
+		if len(leftover)+n < types.InputSize {
+			leftover = append(leftover, buf[:n]...)
+			continue
+		}
 
-		_ = game
-		conn.Do()
+		idx := max(0, types.InputSize-len(leftover))
+		chunk := append(leftover, buf[:idx]...)
+		// can you do the ting w/ chunk? Yes => do it
+
+		var input types.Input
+		err = input.UnmarshalBinary(chunk)
+		if err != nil {
+			slog.Error("failed to unmarshal input", "error", err)
+			continue
+		}
+
+		slog.Info("got input", "input", input)
+
+		// No?
+		leftover = append([]byte(nil), buf[idx:]...)
 	}
 }
 
