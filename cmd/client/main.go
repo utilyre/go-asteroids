@@ -12,16 +12,12 @@ import (
 )
 
 type Game struct {
-	conn        *net.UDPConn
+	conn        net.Conn
 	inputBuffer *inputbuffer.InputBuffer
 }
 
 func NewGame() (*Game, error) {
-	udpAddr, err := net.ResolveUDPAddr("udp", ":3000")
-	if err != nil {
-		return nil, err
-	}
-	conn, err := net.DialUDP("udp", nil, udpAddr)
+	conn, err := net.Dial("udp", ":3000")
 	if err != nil {
 		return nil, err
 	}
@@ -31,6 +27,30 @@ func NewGame() (*Game, error) {
 		inputBuffer: &inputbuffer.InputBuffer{},
 	}, nil
 }
+
+/* func (g *Game) Start(ctx context.Context) error {
+	go g.inputBufferSynchronizer(ctx)
+	return nil
+}
+
+func (g *Game) inputBufferSynchronizer(ctx context.Context) {
+	ticker := time.NewTicker(time.Second / 60)
+	defer ticker.Stop()
+	for {
+		data, err := g.inputBuffer.MarshalBinary()
+		if err != nil {
+			slog.Warn("failed to marshal input buffer", "error", err)
+			continue
+		}
+
+		n, err := g.conn.Write(data)
+		if n != len(data) {
+			panic("could not write the entire input buffer")
+		}
+
+		<-ticker.C
+	}
+} */
 
 func (g *Game) Close() error {
 	return g.conn.Close()
@@ -73,6 +93,9 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeigh
 }
 
 func main() {
+	/* ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel() */
+
 	ebiten.SetWindowSize(640, 480)
 	ebiten.SetWindowTitle("Hello, World!")
 
@@ -82,6 +105,12 @@ func main() {
 		return
 	}
 	defer g.Close()
+
+	/* err = g.Start(ctx)
+	if err != nil {
+		slog.Error("failed to start game", "error", err)
+		return
+	} */
 
 	if err := ebiten.RunGame(g); err != nil {
 		log.Fatal(err)

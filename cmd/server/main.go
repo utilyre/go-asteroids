@@ -11,47 +11,64 @@ import (
 )
 
 func main() {
-	udpAddr, err := net.ResolveUDPAddr("udp", ":3000")
-	if err != nil {
-		slog.Error("failed to resolve udp address", "error", err)
-		return
-	}
-	udpConn, err := net.ListenUDP("udp", udpAddr)
+	conn, err := net.ListenPacket("udp", ":3000")
 	if err != nil {
 		slog.Error("failed to listen on udp", "error", err)
 		return
 	}
-	defer udpConn.Close()
-
-	buf := make([]byte, 1024)
-	var leftover []byte
+	defer conn.Close()
 
 	for {
-		n, _, err := udpConn.ReadFromUDP(buf)
+		buf := make([]byte, 1024)
+
+		n, addr, err := conn.ReadFrom(buf)
 		if err != nil {
 			slog.Error("failed to read from udp", "error", err)
 			continue
 		}
-		if len(leftover)+n < types.InputSize {
-			leftover = append(leftover, buf[:n]...)
-			continue
-		}
 
-		idx := max(0, types.InputSize-len(leftover))
-		chunk := append(leftover, buf[:idx]...)
-		// can you do the ting w/ chunk? Yes => do it
-
-		var input types.Input
-		err = input.UnmarshalBinary(chunk)
+		var size uint16
+		n, err = binary.Decode(buf[:n], binary.BigEndian, &size)
 		if err != nil {
-			slog.Error("failed to unmarshal input", "error", err)
+			slog.Error("failed to decode size from payload", "error", err)
 			continue
 		}
+		if n != 2 {
+			panic("why?")
+		}
+		if 2+int(size)*types.InputSize > len(buf) {
+			panic("we are in trouble")
+		}
 
-		slog.Info("got input", "input", input)
+		inputs := make([]types.Input, size)
+		for i := range len(inputs) {
+			err = inputs[i].UnmarshalBinary(buf[2+i*types.InputSize : 2+(i+1)*types.InputSize])
+			if err != nil {
+				panic("wtf")
+			}
+		}
 
-		// No?
-		leftover = append([]byte(nil), buf[idx:]...)
+		lastIndex := inputs[len(inputs)-1].Index
+		slog.Info("last index", "idx", lastIndex)
+
+		lastIndexData := make([]byte, 4)
+		n, err = binary.Encode(lastIndexData, binary.BigEndian, lastIndex)
+		if err != nil {
+			panic("should have enough space")
+		}
+		if n != len(lastIndexData) {
+			panic("no way")
+		}
+
+		n, err = conn.WriteTo(lastIndexData, addr)
+		if err != nil {
+			slog.Error("failed to ack last input", "error", err)
+			continue
+		}
+		if n != len(lastIndexData) {
+			panic("why not")
+		}
+		slog.Info("sent ack")
 	}
 }
 
