@@ -1,11 +1,13 @@
 package main
 
 import (
+	"encoding/binary"
 	"log"
 	"log/slog"
 	"multiplayer/internal/inputbuffer"
 	"multiplayer/internal/types"
 	"net"
+	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
@@ -28,29 +30,50 @@ func NewGame() (*Game, error) {
 	}, nil
 }
 
-/* func (g *Game) Start(ctx context.Context) error {
-	go g.inputBufferSynchronizer(ctx)
+func (g *Game) Start() error {
+	go g.inputBufferSender()
+	go g.inputBufferFlusher()
 	return nil
 }
 
-func (g *Game) inputBufferSynchronizer(ctx context.Context) {
+func (g *Game) inputBufferFlusher() {
+	for {
+		data := make([]byte, 4)
+		n, err := g.conn.Read(data)
+		if err != nil {
+			slog.Error("failed to read ack", "error", err)
+			continue
+		}
+		if n != len(data) {
+			panic("heeee")
+		}
+
+		var index uint32
+		n, err = binary.Decode(data, binary.BigEndian, &index)
+		if err != nil {
+			slog.Error("failed to decode ack index", "error", err)
+			continue
+		}
+		if n != len(data) {
+			panic("stop it")
+		}
+
+		err = g.inputBuffer.FlushUntil(index)
+		if err != nil {
+			slog.Error("failed to flush until", "error", err)
+			continue
+		}
+	}
+}
+
+func (g *Game) inputBufferSender() {
 	ticker := time.NewTicker(time.Second / 60)
 	defer ticker.Stop()
 	for {
-		data, err := g.inputBuffer.MarshalBinary()
-		if err != nil {
-			slog.Warn("failed to marshal input buffer", "error", err)
-			continue
-		}
-
-		n, err := g.conn.Write(data)
-		if n != len(data) {
-			panic("could not write the entire input buffer")
-		}
-
+		g.sendInputBuffer()
 		<-ticker.C
 	}
-} */
+}
 
 func (g *Game) Close() error {
 	return g.conn.Close()
@@ -65,7 +88,7 @@ func (g *Game) Update() error {
 	}
 	g.inputBuffer.Add(input)
 
-	g.sendInputBuffer()
+	// g.sendInputBuffer()
 
 	return nil
 }
@@ -106,11 +129,11 @@ func main() {
 	}
 	defer g.Close()
 
-	/* err = g.Start(ctx)
+	err = g.Start()
 	if err != nil {
 		slog.Error("failed to start game", "error", err)
 		return
-	} */
+	}
 
 	if err := ebiten.RunGame(g); err != nil {
 		log.Fatal(err)

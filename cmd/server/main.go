@@ -47,6 +47,10 @@ func main() {
 				panic("wtf")
 			}
 		}
+		if len(inputs) == 0 {
+			slog.Info("skipping this one")
+			continue
+		}
 
 		lastIndex := inputs[len(inputs)-1].Index
 		slog.Info("last index", "idx", lastIndex)
