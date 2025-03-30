@@ -37,7 +37,7 @@ func main() {
 			panic("why?")
 		}
 		if 2+int(size)*types.InputSize > len(buf) {
-			panic("we are in trouble")
+			panic("we are in trouble") // HIT
 		}
 
 		inputs := make([]types.Input, size)
@@ -52,11 +52,11 @@ func main() {
 			continue
 		}
 
-		lastIndex := inputs[len(inputs)-1].Index
-		slog.Info("last index", "idx", lastIndex)
+		lastInput := inputs[len(inputs)-1]
+		slog.Info("last input", "idx", lastInput.Index, "left", lastInput.Left)
 
 		lastIndexData := make([]byte, 4)
-		n, err = binary.Encode(lastIndexData, binary.BigEndian, lastIndex)
+		n, err = binary.Encode(lastIndexData, binary.BigEndian, lastInput.Index)
 		if err != nil {
 			panic("should have enough space")
 		}

@@ -3,6 +3,7 @@ package inputbuffer
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"multiplayer/internal/types"
 )
 
@@ -33,7 +34,7 @@ func (buf *InputBuffer) FlushUntil(index uint32) error {
 	return nil
 }
 
-func (buf *InputBuffer) MarshalBinary() ([]byte, error) {
+func (buf InputBuffer) MarshalBinary() ([]byte, error) {
 	finalSize := 2 + types.InputSize*len(buf.inputs)
 	data := make([]byte, 2, finalSize)
 
@@ -51,7 +52,7 @@ func (buf *InputBuffer) MarshalBinary() ([]byte, error) {
 	}
 
 	if len(data) != finalSize {
-		panic("data does not exceed expected size")
+		panic(fmt.Sprintf("expected size %d; actual size %d", finalSize, len(data))) // HIT
 	}
 
 	return data, nil
