@@ -118,7 +118,11 @@ func (g *Game) inputBufferSender() {
 }
 
 func (g *Game) Close() error {
-	return g.conn.Close()
+	err := g.conn.Close()
+	if err != nil {
+		return fmt.Errorf("closing udp %s: %w", g.conn.LocalAddr(), err)
+	}
+	return nil
 }
 
 func (g *Game) Update() error {
