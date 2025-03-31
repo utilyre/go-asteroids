@@ -96,6 +96,36 @@ func ackInput(conn net.PacketConn, addr net.Addr, input types.Input) error {
 	return nil
 }
 
+type InputQueue struct {
+	ch        chan types.Input
+	lastIndex atomic.Uint32
+}
+
+func NewInputQueue() *InputQueue {
+	return &InputQueue{ch: make(chan types.Input, 1)}
+}
+
+func (q *InputQueue) Close() {
+	close(q.ch)
+}
+
+func (q *InputQueue) ProcessInputs(inputs []types.Input) {
+	lastIdx := q.lastIndex.Load()
+	for _, input := range inputs {
+		if input.Index <= lastIdx {
+			continue
+		}
+
+		q.ch <- input
+		q.lastIndex.Store(input.Index)
+	}
+}
+
+func (q *InputQueue) Dequeue() (input types.Input, open bool) {
+	input, open = <-q.ch
+	return input, open
+}
+
 func main() {
 	srv, err := NewGameServer(":3000")
 	if err != nil {
@@ -103,14 +133,15 @@ func main() {
 		return
 	}
 
-	var (
-		inputsCh       = make(chan types.Input, 1)
-		lastInputIndex atomic.Uint32
-	)
-	defer close(inputsCh)
+	inputQueue := NewInputQueue()
+	defer inputQueue.Close()
 
 	go func() {
-		for input := range inputsCh {
+		for {
+			input, open := inputQueue.Dequeue()
+			if !open {
+				break
+			}
 			slog.Info("received input", "input", input)
 		}
 	}()
@@ -145,15 +176,7 @@ func main() {
 			slog.Info("acknowledged last input", "index", lastInput.Index)
 		}
 
-		lastIdx := lastInputIndex.Load()
-		for _, input := range inputs {
-			if input.Index <= lastIdx {
-				continue
-			}
-
-			inputsCh <- input
-			lastInputIndex.Store(input.Index)
-		}
+		inputQueue.ProcessInputs(inputs)
 	}
 }
 
