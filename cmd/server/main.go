@@ -15,6 +15,59 @@ import (
 
 const inputRate = 15
 
+func main() {
+	srv, err := NewGameServer(":3000")
+	if err != nil {
+		slog.Error("failed to instantiate game server", "error", err)
+		return
+	}
+
+	inputQueue := NewInputQueue()
+	defer inputQueue.Close()
+
+	go func() {
+		for {
+			input, open := inputQueue.Dequeue()
+			if !open {
+				break
+			}
+			slog.Info("received input", "input", input)
+		}
+	}()
+
+	lastMessage := time.Now()
+	for {
+		inputs, addr, err := readInputsPacket(srv.conn, 1024)
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			continue
+		}
+		if err != nil {
+			slog.Warn("failed to read udp message",
+				"address", addr, "error", err)
+			continue
+		}
+
+		// drop messages that are received faster than inputRate
+		if dt := time.Since(lastMessage); dt < time.Second/inputRate {
+			continue
+		}
+		lastMessage = time.Now()
+
+		if len(inputs) > 0 {
+			lastInput := inputs[len(inputs)-1]
+			err = ackInput(srv.conn, addr, lastInput)
+			if err != nil {
+				slog.Warn("failed to acknowledge last input",
+					"address", addr, "error", err)
+				continue
+			}
+			slog.Info("acknowledged last input", "index", lastInput.Index)
+		}
+
+		inputQueue.ProcessInputs(inputs)
+	}
+}
+
 type GameServer struct {
 	conn net.PacketConn
 }
@@ -126,59 +179,6 @@ func (q *InputQueue) ProcessInputs(inputs []types.Input) {
 func (q *InputQueue) Dequeue() (input types.Input, open bool) {
 	input, open = <-q.ch
 	return input, open
-}
-
-func main() {
-	srv, err := NewGameServer(":3000")
-	if err != nil {
-		slog.Error("failed to instantiate game server", "error", err)
-		return
-	}
-
-	inputQueue := NewInputQueue()
-	defer inputQueue.Close()
-
-	go func() {
-		for {
-			input, open := inputQueue.Dequeue()
-			if !open {
-				break
-			}
-			slog.Info("received input", "input", input)
-		}
-	}()
-
-	lastMessage := time.Now()
-	for {
-		inputs, addr, err := readInputsPacket(srv.conn, 1024)
-		if errors.Is(err, os.ErrDeadlineExceeded) {
-			continue
-		}
-		if err != nil {
-			slog.Warn("failed to read udp message",
-				"address", addr, "error", err)
-			continue
-		}
-
-		// drop messages that are received faster than inputRate
-		if dt := time.Since(lastMessage); dt < time.Second/inputRate {
-			continue
-		}
-		lastMessage = time.Now()
-
-		if len(inputs) > 0 {
-			lastInput := inputs[len(inputs)-1]
-			err = ackInput(srv.conn, addr, lastInput)
-			if err != nil {
-				slog.Warn("failed to acknowledge last input",
-					"address", addr, "error", err)
-				continue
-			}
-			slog.Info("acknowledged last input", "index", lastInput.Index)
-		}
-
-		inputQueue.ProcessInputs(inputs)
-	}
 }
 
 type Input struct {
