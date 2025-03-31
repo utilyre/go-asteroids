@@ -26,12 +26,16 @@ func main() {
 	defer inputQueue.Close()
 
 	go func() {
+		game := Game{}
 		for {
 			input, open := inputQueue.Dequeue()
 			if !open {
 				break
 			}
-			slog.Info("received input", "input", input)
+
+			game.Update(input)
+			slog.Info("game state changed", "x",
+				game.Position.X, "y", game.Position.Y)
 		}
 	}()
 
@@ -181,16 +185,11 @@ func (q *InputQueue) Dequeue() (input types.Input, open bool) {
 	return input, open
 }
 
-type Input struct {
-	Index                 uint32
-	Up, Left, Down, Right bool
-}
-
 type Game struct {
 	Position struct{ X, Y float64 }
 }
 
-func (g *Game) Update(input Input) {
+func (g *Game) Update(input types.Input) {
 	dx := 0.0
 	dy := 0.0
 	if input.Up {

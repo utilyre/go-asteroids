@@ -8,6 +8,11 @@ import (
 	"time"
 )
 
+type Input struct {
+	Index                 uint32
+	Up, Left, Down, Right bool
+}
+
 func (conn *Conn) Do() {
 	sizeData := make([]byte, 2)
 	n, firstAddr, err := conn.ReadFromUDP(sizeData)
