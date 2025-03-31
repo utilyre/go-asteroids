@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -30,6 +31,65 @@ func (srv *GameServer) Close() error {
 	return nil
 }
 
+var (
+	errShortMessage     = errors.New("message not long enough")
+	errCorruptedMessage = errors.New("message was corrupted")
+)
+
+func readInputsPacket(conn net.PacketConn, bufSize int) ([]types.Input, net.Addr, error) {
+	buf := make([]byte, bufSize)
+	n, addr, readErr := conn.ReadFrom(buf)
+	if n < 2 {
+		return nil, nil, fmt.Errorf("reading from udp %q: %w", addr, errShortMessage)
+	}
+
+	var size uint16
+	_, err := binary.Decode(buf[:n], binary.BigEndian, &size)
+	if err != nil {
+		panic("message should have been large enough")
+	}
+	if size == 0 {
+		return []types.Input{}, addr, nil
+	}
+	if 2+int(size)*types.InputSize > n {
+		return nil, nil, fmt.Errorf("reading from udp %q: %w", addr, errCorruptedMessage)
+	}
+	if 2+int(size)*types.InputSize > bufSize {
+		// TODO: ensure this does not happen by timing out slow connections
+		panic("message size should not have exceeded the anticipated buffer size")
+	}
+
+	// readErr must be handled after processing udp message
+	if readErr != nil {
+		return nil, nil, fmt.Errorf("reading from udp %q: %w", addr, err)
+	}
+
+	inputs := make([]types.Input, size)
+	for i := range len(inputs) {
+		err = inputs[i].UnmarshalBinary(buf[2+i*types.InputSize : 2+(i+1)*types.InputSize])
+		if err != nil {
+			return nil, nil, fmt.Errorf("unmarshaling input #%d: %w", i, err)
+		}
+	}
+
+	return inputs, addr, nil
+}
+
+func ackInput(conn net.PacketConn, addr net.Addr, input types.Input) error {
+	lastIndexData := make([]byte, 4)
+	_, err := binary.Encode(lastIndexData, binary.BigEndian, input.Index)
+	if err != nil {
+		panic("data should have been large enough")
+	}
+
+	_, err = conn.WriteTo(lastIndexData, addr)
+	if err != nil {
+		return fmt.Errorf("writing to udp %q: %w", addr, err)
+	}
+
+	return nil
+}
+
 func main() {
 	srv, err := NewGameServer(":3000")
 	if err != nil {
@@ -38,60 +98,23 @@ func main() {
 	}
 
 	for {
-		buf := make([]byte, 1024)
-
-		n, addr, err := srv.conn.ReadFrom(buf)
+		inputs, addr, err := readInputsPacket(srv.conn, 1024)
 		if err != nil {
-			slog.Error("failed to read from udp", "error", err)
+			slog.Warn("failed to read udp message",
+				"address", addr, "error", err)
 			continue
 		}
 
-		var size uint16
-		n, err = binary.Decode(buf[:n], binary.BigEndian, &size)
-		if err != nil {
-			slog.Error("failed to decode size from payload", "error", err)
-			continue
-		}
-		if n != 2 {
-			panic("why?")
-		}
-		if 2+int(size)*types.InputSize > len(buf) {
-			panic("we are in trouble") // HIT
-		}
-
-		inputs := make([]types.Input, size)
-		for i := range len(inputs) {
-			err = inputs[i].UnmarshalBinary(buf[2+i*types.InputSize : 2+(i+1)*types.InputSize])
+		if len(inputs) > 0 {
+			lastInput := inputs[len(inputs)-1]
+			err = ackInput(srv.conn, addr, lastInput)
 			if err != nil {
-				panic("wtf")
+				slog.Warn("failed to acknowledge last input",
+					"address", addr, "error", err)
+				continue
 			}
+			slog.Info("acknowledged last input", "index", lastInput.Index)
 		}
-		if len(inputs) == 0 {
-			slog.Info("skipping this one")
-			continue
-		}
-
-		lastInput := inputs[len(inputs)-1]
-		slog.Info("last input", "idx", lastInput.Index, "left", lastInput.Left)
-
-		lastIndexData := make([]byte, 4)
-		n, err = binary.Encode(lastIndexData, binary.BigEndian, lastInput.Index)
-		if err != nil {
-			panic("should have enough space")
-		}
-		if n != len(lastIndexData) {
-			panic("no way")
-		}
-
-		n, err = srv.conn.WriteTo(lastIndexData, addr)
-		if err != nil {
-			slog.Error("failed to ack last input", "error", err)
-			continue
-		}
-		if n != len(lastIndexData) {
-			panic("why not")
-		}
-		slog.Info("sent ack")
 	}
 }
 

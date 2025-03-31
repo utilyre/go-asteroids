@@ -71,7 +71,7 @@ func readAckIndex(r io.Reader) (index uint32, err error) {
 
 	n, err = binary.Decode(data, binary.BigEndian, &index)
 	if err != nil {
-		return 0, fmt.Errorf("decoding ack index: %w", err)
+		panic("data should have been big enough")
 	}
 	if l := len(data); n < l {
 		panic("message should have been big enough")
