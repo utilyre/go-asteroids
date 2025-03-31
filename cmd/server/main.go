@@ -25,19 +25,8 @@ func main() {
 	inputQueue := NewInputQueue()
 	defer inputQueue.Close()
 
-	go func() {
-		game := Game{}
-		for {
-			input, open := inputQueue.Dequeue()
-			if !open {
-				break
-			}
-
-			game.Update(input)
-			slog.Info("game state changed", "x",
-				game.Position.X, "y", game.Position.Y)
-		}
-	}()
+	simulation := NewSimulation(inputQueue)
+	go simulation.Run()
 
 	lastMessage := time.Now()
 	for {
@@ -185,11 +174,30 @@ func (q *InputQueue) Dequeue() (input types.Input, open bool) {
 	return input, open
 }
 
-type Game struct {
-	Position struct{ X, Y float64 }
+type Simulation struct {
+	inputQueue *InputQueue
+	position   struct{ X, Y float64 }
 }
 
-func (g *Game) Update(input types.Input) {
+func NewSimulation(inputQueue *InputQueue) *Simulation {
+	return &Simulation{
+		inputQueue: inputQueue,
+	}
+}
+
+func (g *Simulation) Run() {
+	for {
+		input, open := g.inputQueue.Dequeue()
+		if !open {
+			break
+		}
+
+		g.Update(input)
+		slog.Info("game state changed", "x", g.position.X, "y", g.position.Y)
+	}
+}
+
+func (g *Simulation) Update(input types.Input) {
 	dx := 0.0
 	dy := 0.0
 	if input.Up {
@@ -211,6 +219,6 @@ func (g *Game) Update(input types.Input) {
 		dy /= magnitude
 	}
 
-	g.Position.X += dx
-	g.Position.Y += dy
+	g.position.X += dx
+	g.position.Y += dy
 }
