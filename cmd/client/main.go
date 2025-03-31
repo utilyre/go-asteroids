@@ -57,6 +57,8 @@ func (g *Game) Start() error {
 	return nil
 }
 
+var errShortMessage = errors.New("message not long enough")
+
 func readAckIndex(r io.Reader) (index uint32, err error) {
 	data := make([]byte, 4)
 	n, err := r.Read(data)
@@ -64,7 +66,7 @@ func readAckIndex(r io.Reader) (index uint32, err error) {
 		return 0, fmt.Errorf("reading ack: %w", err)
 	}
 	if l := len(data); n < l {
-		panic("TODO")
+		return 0, fmt.Errorf("reading ack: %w", errShortMessage)
 	}
 
 	n, err = binary.Decode(data, binary.BigEndian, &index)
@@ -72,7 +74,7 @@ func readAckIndex(r io.Reader) (index uint32, err error) {
 		return 0, fmt.Errorf("decoding ack index: %w", err)
 	}
 	if l := len(data); n < l {
-		panic("TODO")
+		panic("message should have been big enough")
 	}
 
 	return index, nil
@@ -142,15 +144,10 @@ func writeInputBuffer(w io.Writer, buf inputbuffer.InputBuffer) error {
 	if err != nil {
 		return fmt.Errorf("marshaling input buffer: %w", err)
 	}
-
-	n, err := w.Write(bufData)
+	_, err = w.Write(bufData)
 	if err != nil {
 		return fmt.Errorf("writing input buffer: %w", err)
 	}
-	if l := len(bufData); n < l {
-		panic("TODO")
-	}
-
 	return nil
 }
 

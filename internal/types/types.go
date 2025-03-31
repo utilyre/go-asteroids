@@ -3,6 +3,7 @@ package types
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 )
 
 const InputSize int = 5
@@ -16,7 +17,7 @@ func (i Input) MarshalBinary() ([]byte, error) {
 	data := make([]byte, InputSize)
 	_, err := binary.Encode(data, binary.BigEndian, i.Index)
 	if err != nil {
-		panic("data is large enough")
+		panic("data should have been large enough")
 	}
 
 	if i.Up {
@@ -35,14 +36,16 @@ func (i Input) MarshalBinary() ([]byte, error) {
 	return data, nil
 }
 
+var ErrTooSmall = errors.New("too small")
+
 func (i *Input) UnmarshalBinary(data []byte) error {
-	if len(data) < InputSize {
-		return errors.New("data too small")
+	if l := len(data); l < InputSize {
+		return fmt.Errorf("data with len %d: %w", l, ErrTooSmall)
 	}
 
 	_, err := binary.Decode(data, binary.BigEndian, &i.Index)
 	if err != nil {
-		panic("data is large enough")
+		panic("data should have been large enough")
 	}
 
 	i.Up = data[4]&(1<<0) != 0

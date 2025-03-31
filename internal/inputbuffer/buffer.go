@@ -40,19 +40,20 @@ func (buf InputBuffer) MarshalBinary() ([]byte, error) {
 
 	_, err := binary.Encode(data, binary.BigEndian, uint16(len(buf.inputs)))
 	if err != nil {
-		panic("buffer is large enough")
+		panic("data should have been large enough")
 	}
 
 	for _, input := range buf.inputs {
 		inputData, err := input.MarshalBinary()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("marshaling input: %w", err)
 		}
 		data = append(data, inputData...)
 	}
 
-	if len(data) != finalSize {
-		panic(fmt.Sprintf("expected size %d; actual size %d", finalSize, len(data))) // HIT
+	if l := len(data); l != finalSize {
+		panic(fmt.Sprintf("ended up with data of size %d instead of %d",
+			l, finalSize)) // HIT
 	}
 
 	return data, nil
