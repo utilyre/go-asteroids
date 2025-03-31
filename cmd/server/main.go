@@ -8,6 +8,9 @@ import (
 	"math"
 	"multiplayer/internal/types"
 	"net"
+	"os"
+	"sync/atomic"
+	"time"
 )
 
 type GameServer struct {
@@ -39,8 +42,11 @@ var (
 func readInputsPacket(conn net.PacketConn, bufSize int) ([]types.Input, net.Addr, error) {
 	buf := make([]byte, bufSize)
 	n, addr, readErr := conn.ReadFrom(buf)
+	if errors.Is(readErr, os.ErrDeadlineExceeded) {
+		return nil, nil, fmt.Errorf("reading from udp: %w", readErr)
+	}
 	if n < 2 {
-		return nil, nil, fmt.Errorf("reading from udp %q: %w", addr, errShortMessage)
+		return nil, nil, fmt.Errorf("reading from udp: %w", errShortMessage)
 	}
 
 	var size uint16
@@ -52,7 +58,7 @@ func readInputsPacket(conn net.PacketConn, bufSize int) ([]types.Input, net.Addr
 		return []types.Input{}, addr, nil
 	}
 	if 2+int(size)*types.InputSize > n {
-		return nil, nil, fmt.Errorf("reading from udp %q: %w", addr, errCorruptedMessage)
+		return nil, nil, fmt.Errorf("reading from udp %w", errCorruptedMessage)
 	}
 	if 2+int(size)*types.InputSize > bufSize {
 		// TODO: ensure this does not happen by timing out slow connections
@@ -61,7 +67,7 @@ func readInputsPacket(conn net.PacketConn, bufSize int) ([]types.Input, net.Addr
 
 	// readErr must be handled after processing udp message
 	if readErr != nil {
-		return nil, nil, fmt.Errorf("reading from udp %q: %w", addr, err)
+		return nil, nil, fmt.Errorf("reading from udp: %w", err)
 	}
 
 	inputs := make([]types.Input, size)
@@ -84,7 +90,7 @@ func ackInput(conn net.PacketConn, addr net.Addr, input types.Input) error {
 
 	_, err = conn.WriteTo(lastIndexData, addr)
 	if err != nil {
-		return fmt.Errorf("writing to udp %q: %w", addr, err)
+		return fmt.Errorf("writing to udp: %w", err)
 	}
 
 	return nil
@@ -97,13 +103,36 @@ func main() {
 		return
 	}
 
+	var (
+		inputsCh       = make(chan types.Input, 1)
+		lastInputIndex atomic.Uint32
+	)
+	defer close(inputsCh)
+
+	go func() {
+		for input := range inputsCh {
+			slog.Info("received input", "input", input)
+		}
+	}()
+
+	lastMessage := time.Now()
 	for {
 		inputs, addr, err := readInputsPacket(srv.conn, 1024)
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			continue
+		}
 		if err != nil {
 			slog.Warn("failed to read udp message",
 				"address", addr, "error", err)
 			continue
 		}
+
+		// drop message if received one before cooldown time
+		if dt := time.Since(lastMessage); dt.Microseconds() < (time.Second / 15).Microseconds() {
+			slog.Info("message lost", "dt", dt)
+			continue
+		}
+		lastMessage = time.Now()
 
 		if len(inputs) > 0 {
 			lastInput := inputs[len(inputs)-1]
@@ -114,6 +143,16 @@ func main() {
 				continue
 			}
 			slog.Info("acknowledged last input", "index", lastInput.Index)
+		}
+
+		lastIdx := lastInputIndex.Load()
+		for _, input := range inputs {
+			if input.Index <= lastIdx {
+				continue
+			}
+
+			inputsCh <- input
+			lastInputIndex.Store(input.Index)
 		}
 	}
 }
