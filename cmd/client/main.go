@@ -152,7 +152,12 @@ func writeInputBuffer(w io.Writer, buf inputbuffer.InputBuffer) error {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	ebitenutil.DebugPrint(screen, "Hello, World!")
+	ebitenutil.DebugPrint(screen, fmt.Sprintf("W: %v\nA: %v\nS: %v\nD: %v",
+		ebiten.IsKeyPressed(ebiten.KeyW),
+		ebiten.IsKeyPressed(ebiten.KeyA),
+		ebiten.IsKeyPressed(ebiten.KeyS),
+		ebiten.IsKeyPressed(ebiten.KeyD),
+	))
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
