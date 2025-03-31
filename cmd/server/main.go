@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+const inputRate = 15
+
 type GameServer struct {
 	conn net.PacketConn
 }
@@ -158,9 +160,8 @@ func main() {
 			continue
 		}
 
-		// drop message if received one before cooldown time
-		if dt := time.Since(lastMessage); dt.Microseconds() < (time.Second / 15).Microseconds() {
-			slog.Info("message lost", "dt", dt)
+		// drop messages that are received faster than inputRate
+		if dt := time.Since(lastMessage); dt < time.Second/inputRate {
 			continue
 		}
 		lastMessage = time.Now()
