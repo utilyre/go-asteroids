@@ -149,7 +149,12 @@ func writeInputBuffer(w io.Writer, buf inputbuffer.InputBuffer) error {
 	if err != nil {
 		return fmt.Errorf("marshaling input buffer: %w", err)
 	}
-	_, err = w.Write(bufData)
+
+	toWrite := make([]byte, 1)
+	toWrite[0] = 1 // one for input
+	toWrite = append(toWrite, bufData...)
+
+	_, err = w.Write(toWrite)
 	if err != nil {
 		return fmt.Errorf("writing input buffer: %w", err)
 	}
