@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"image/color"
 	"io"
 	"log/slog"
 	"multiplayer/internal/inputbuffer"
@@ -12,7 +13,6 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 )
 
 func main() {
@@ -38,6 +38,8 @@ func main() {
 }
 
 type Game struct {
+	types.State
+	img         *ebiten.Image
 	conn        net.Conn
 	inputBuffer inputbuffer.InputBuffer
 }
@@ -48,7 +50,10 @@ func NewGame() (*Game, error) {
 		return nil, err
 	}
 
-	return &Game{conn: conn}, nil
+	img := ebiten.NewImage(10, 10)
+	img.Fill(color.White)
+
+	return &Game{img: img, conn: conn}, nil
 }
 
 func (g *Game) Start() error {
@@ -152,12 +157,16 @@ func writeInputBuffer(w io.Writer, buf inputbuffer.InputBuffer) error {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	ebitenutil.DebugPrint(screen, fmt.Sprintf("W: %v\nA: %v\nS: %v\nD: %v",
+	/* ebitenutil.DebugPrint(screen, fmt.Sprintf("W: %v\nA: %v\nS: %v\nD: %v",
 		ebiten.IsKeyPressed(ebiten.KeyW),
 		ebiten.IsKeyPressed(ebiten.KeyA),
 		ebiten.IsKeyPressed(ebiten.KeyS),
 		ebiten.IsKeyPressed(ebiten.KeyD),
-	))
+	)) */
+
+	var m ebiten.GeoM
+	m.Translate(g.Position.X, g.Position.Y)
+	screen.DrawImage(g.img, &ebiten.DrawImageOptions{GeoM: m})
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
