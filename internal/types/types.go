@@ -6,6 +6,42 @@ import (
 	"fmt"
 )
 
+const StateSize = 128
+
+type State struct {
+	Position struct{ X, Y float64 }
+}
+
+func (s *State) MarshalBinary() ([]byte, error) {
+	data := make([]byte, StateSize)
+	_, err := binary.Encode(data, binary.BigEndian, s.Position.X)
+	if err != nil {
+		panic("data should have been large enough")
+	}
+	_, err = binary.Encode(data[64:], binary.BigEndian, s.Position.Y)
+	if err != nil {
+		panic("data should have been large enough")
+	}
+	return data, nil
+}
+
+func (s *State) UnmarshalBinary(data []byte) error {
+	if l := len(data); l < InputSize {
+		return fmt.Errorf("data with len %d: %w", l, ErrTooSmall)
+	}
+
+	_, err := binary.Decode(data, binary.BigEndian, &s.Position.X)
+	if err != nil {
+		panic("data should have been large enough")
+	}
+	_, err = binary.Decode(data, binary.BigEndian, &s.Position.Y)
+	if err != nil {
+		panic("data should have been large enough")
+	}
+
+	return nil
+}
+
 const InputSize int = 5
 
 type Input struct { // ~5B

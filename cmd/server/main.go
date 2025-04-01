@@ -175,8 +175,8 @@ func (q *InputQueue) Dequeue() (input types.Input, open bool) {
 }
 
 type Simulation struct {
+	types.State
 	inputQueue *InputQueue
-	position   struct{ X, Y float64 }
 }
 
 func NewSimulation(inputQueue *InputQueue) *Simulation {
@@ -193,7 +193,7 @@ func (g *Simulation) Run() {
 		}
 
 		g.Update(input)
-		slog.Info("game state changed", "x", g.position.X, "y", g.position.Y)
+		slog.Info("game state changed", "x", g.Position.X, "y", g.Position.Y)
 	}
 }
 
@@ -219,6 +219,6 @@ func (g *Simulation) Update(input types.Input) {
 		dy /= magnitude
 	}
 
-	g.position.X += dx
-	g.position.Y += dy
+	g.Position.X += dx
+	g.Position.Y += dy
 }
