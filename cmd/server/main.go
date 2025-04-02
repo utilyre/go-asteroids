@@ -93,31 +93,22 @@ func readInputsPacket(conn net.PacketConn, bufSize int) ([]types.Input, net.Addr
 	if errors.Is(readErr, os.ErrDeadlineExceeded) {
 		return nil, nil, fmt.Errorf("reading from udp: %w", readErr)
 	}
-	if n < 3 {
+	if n < 2 {
 		return nil, nil, fmt.Errorf("reading from udp: %w", errShortMessage)
 	}
 
-	var typ byte
-	_, err := binary.Decode(buf[:n], binary.BigEndian, &typ)
-	if err != nil {
-		panic("message should have been large enough")
-	}
-	if typ != 1 {
-		panic("unsupported message type")
-	}
-
 	var size uint16
-	_, err = binary.Decode(buf[1:n], binary.BigEndian, &size)
+	_, err := binary.Decode(buf[:n], binary.BigEndian, &size)
 	if err != nil {
 		panic("message should have been large enough")
 	}
 	if size == 0 {
 		return []types.Input{}, addr, nil
 	}
-	if 3+int(size)*types.InputSize > n {
+	if 2+int(size)*types.InputSize > n {
 		return nil, nil, fmt.Errorf("reading from udp %w", errCorruptedMessage)
 	}
-	if 3+int(size)*types.InputSize > bufSize {
+	if 2+int(size)*types.InputSize > bufSize {
 		// TODO: ensure this does not happen by timing out slow connections
 		panic("message size should not have exceeded the anticipated buffer size")
 	}
@@ -129,7 +120,7 @@ func readInputsPacket(conn net.PacketConn, bufSize int) ([]types.Input, net.Addr
 
 	inputs := make([]types.Input, size)
 	for i := range len(inputs) {
-		err = inputs[i].UnmarshalBinary(buf[3+i*types.InputSize : 3+(i+1)*types.InputSize])
+		err = inputs[i].UnmarshalBinary(buf[2+i*types.InputSize : 2+(i+1)*types.InputSize])
 		if err != nil {
 			return nil, nil, fmt.Errorf("unmarshaling input #%d: %w", i, err)
 		}
