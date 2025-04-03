@@ -1,4 +1,4 @@
-package inputbuffer
+package main
 
 import (
 	"encoding/binary"
