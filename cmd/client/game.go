@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"image/color"
@@ -49,12 +49,19 @@ func NewGame() (*Game, error) {
 	return g, nil
 }
 
-func (g *Game) inputAckHandler(sender net.Addr, msg *gameconn.Message) {
-	index, err := readAckIndex(bytes.NewReader(msg.Body))
+func (g *Game) Close() error {
+	err := g.conn.Close()
 	if err != nil {
-		slog.Warn("failed to read ack index",
-			"sender", sender, "error", err)
-		return
+		return fmt.Errorf("closing udp %s: %w", g.conn.LocalAddr(), err)
+	}
+	return nil
+}
+
+func (g *Game) inputAckHandler(sender net.Addr, msg *gameconn.Message) {
+	var index uint32
+	_, err := binary.Decode(msg.Body, binary.BigEndian, &index)
+	if err != nil {
+		slog.Error("failed to decode ack input index", "error", err)
 	}
 
 	err = g.inputBuffer.FlushUntil(index)
@@ -69,31 +76,21 @@ func (g *Game) inputBufferSender() {
 	ticker := time.NewTicker(time.Second / 60)
 	defer ticker.Stop()
 	for ; ; <-ticker.C {
-		var body bytes.Buffer
-
-		err := writeInputBuffer(&body, g.inputBuffer)
+		body, err := g.inputBuffer.MarshalBinary()
 		if err != nil {
-			slog.Warn("failed to write input buffer", "error", err)
+			slog.Error("failed to marshal input buffer", "error", err)
 			continue
 		}
 
 		err = g.conn.Send(g.serverAddr, &gameconn.Message{
 			Scope: types.ScopeInput,
-			Body:  body.Bytes(),
+			Body:  body,
 		})
 		if errors.Is(err, net.ErrClosed) {
 			slog.Info("connection closed", "server_address", g.serverAddr)
 			return
 		}
 	}
-}
-
-func (g *Game) Close() error {
-	err := g.conn.Close()
-	if err != nil {
-		return fmt.Errorf("closing udp %s: %w", g.conn.LocalAddr(), err)
-	}
-	return nil
 }
 
 func (g *Game) Update() error {
