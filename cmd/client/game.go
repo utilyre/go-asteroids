@@ -89,6 +89,8 @@ func (g *Game) inputAckHandler(sender net.Addr, msg *gameconn.Message) {
 			"until_index", index, "error", err)
 		return
 	}
+
+	slog.Info("flushed input buffer", "until_index", index)
 }
 
 func (g *Game) inputBufferSender() {
