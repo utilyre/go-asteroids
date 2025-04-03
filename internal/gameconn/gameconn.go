@@ -73,7 +73,7 @@ func (conn *Conn) Send(addr net.Addr, msg *Message) error {
 func (conn *Conn) listener() {
 	for {
 		msg, addr, err := conn.readMessage()
-		if errors.Is(err, ErrClosed) {
+		if errors.Is(err, net.ErrClosed) {
 			slog.Info("connection closed", "address", conn.addr)
 			break
 		}
@@ -96,7 +96,6 @@ func (conn *Conn) listener() {
 var (
 	ErrCorruptedMessage   = errors.New("message corrupted")
 	ErrUnsupportedVersion = errors.New("version not supported")
-	ErrClosed             = errors.New("connection closed")
 )
 
 func (conn *Conn) readMessage() (*Message, net.Addr, error) {
@@ -104,9 +103,6 @@ func (conn *Conn) readMessage() (*Message, net.Addr, error) {
 	n, addr, err := conn.inner.ReadFrom(buf)
 	if errors.Is(err, os.ErrDeadlineExceeded) {
 		return nil, nil, fmt.Errorf("reading from udp %q: %w", addr, err)
-	}
-	if errors.Is(err, net.ErrClosed) {
-		return nil, nil, fmt.Errorf("reading from udp %q: %w", addr, ErrClosed)
 	}
 	if n < headerSize {
 		return nil, nil, fmt.Errorf("reading from udp %q: %w",

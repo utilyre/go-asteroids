@@ -6,6 +6,13 @@ import (
 	"fmt"
 )
 
+type Scope = byte
+
+const (
+	ScopeInput Scope = iota + 1
+	ScopeInputAck
+)
+
 const StateSize = 128
 
 type State struct {

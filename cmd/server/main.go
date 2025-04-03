@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"multiplayer/internal/gameconn"
 	"multiplayer/internal/types"
 	"net"
-	"os"
 	"sync/atomic"
 	"time"
 )
@@ -16,62 +16,66 @@ import (
 const inputRate = 15
 
 func main() {
-	srv, err := NewGameServer(":3000")
+	inputQueue := NewInputQueue()
+	defer inputQueue.Close()
+
+	srv, err := NewGameServer(":3000", inputQueue)
 	if err != nil {
 		slog.Error("failed to instantiate game server", "error", err)
 		return
 	}
-
-	inputQueue := NewInputQueue()
-	defer inputQueue.Close()
+	defer srv.Close()
+	srv.Start()
 
 	simulation := NewSimulation(inputQueue)
 	go simulation.Run()
 
+	select {}
+}
+
+type GameServer struct {
+	conn       *gameconn.Conn
+	inputQueue *InputQueue
+}
+
+func NewGameServer(addr string, inputQueue *InputQueue) (*GameServer, error) {
+	conn, err := gameconn.Listen(addr)
+	if err != nil {
+		return nil, fmt.Errorf("binding to udp %s: %w", addr, err)
+	}
+
+	return &GameServer{conn: conn, inputQueue: inputQueue}, nil
+}
+
+func (srv *GameServer) Start() {
 	lastMessage := time.Now()
-	for {
-		inputs, addr, err := readInputsPacket(srv.conn, 1024)
-		if errors.Is(err, os.ErrDeadlineExceeded) {
-			continue
-		}
+	srv.conn.Handle(types.ScopeInput, func(sender net.Addr, msg *gameconn.Message) {
+		inputs, err := readInputsPacket(msg.Body)
 		if err != nil {
-			slog.Warn("failed to read udp message",
-				"address", addr, "error", err)
-			continue
+			slog.Warn("failed to read input message",
+				"sender_address", sender, "error", err)
+			return
 		}
 
 		// drop messages that are received faster than inputRate
 		if dt := time.Since(lastMessage); dt < time.Second/inputRate {
-			continue
+			return
 		}
 		lastMessage = time.Now()
 
 		if len(inputs) > 0 {
 			lastInput := inputs[len(inputs)-1]
-			err = ackInput(srv.conn, addr, lastInput)
+			err = ackInput(srv.conn, sender, lastInput)
 			if err != nil {
 				slog.Warn("failed to acknowledge last input",
-					"address", addr, "error", err)
-				continue
+					"sender_address", sender, "error", err)
+				return
 			}
 			slog.Info("acknowledged last input", "index", lastInput.Index)
 		}
 
-		inputQueue.ProcessInputs(inputs)
-	}
-}
-
-type GameServer struct {
-	conn net.PacketConn
-}
-
-func NewGameServer(addr string) (*GameServer, error) {
-	conn, err := net.ListenPacket("udp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("binding to udp %s: %w", addr, err)
-	}
-
-	return &GameServer{conn: conn}, nil
+		srv.inputQueue.ProcessInputs(inputs)
+	})
 }
 
 func (srv *GameServer) Close() error {
@@ -87,56 +91,45 @@ var (
 	errCorruptedMessage = errors.New("message was corrupted")
 )
 
-func readInputsPacket(conn net.PacketConn, bufSize int) ([]types.Input, net.Addr, error) {
-	buf := make([]byte, bufSize)
-	n, addr, readErr := conn.ReadFrom(buf)
-	if errors.Is(readErr, os.ErrDeadlineExceeded) {
-		return nil, nil, fmt.Errorf("reading from udp: %w", readErr)
-	}
-	if n < 2 {
-		return nil, nil, fmt.Errorf("reading from udp: %w", errShortMessage)
+func readInputsPacket(body []byte) ([]types.Input, error) {
+	if len(body) < 2 {
+		return nil, errShortMessage
 	}
 
 	var size uint16
-	_, err := binary.Decode(buf[:n], binary.BigEndian, &size)
+	_, err := binary.Decode(body, binary.BigEndian, &size)
 	if err != nil {
 		panic("message should have been large enough")
 	}
 	if size == 0 {
-		return []types.Input{}, addr, nil
+		return []types.Input{}, nil
 	}
-	if 2+int(size)*types.InputSize > n {
-		return nil, nil, fmt.Errorf("reading from udp %w", errCorruptedMessage)
-	}
-	if 2+int(size)*types.InputSize > bufSize {
-		// TODO: ensure this does not happen by timing out slow connections
-		panic("message size should not have exceeded the anticipated buffer size")
-	}
-
-	// readErr must be handled after processing udp message
-	if readErr != nil {
-		return nil, nil, fmt.Errorf("reading from udp: %w", err)
+	if 2+int(size)*types.InputSize > len(body) {
+		return nil, fmt.Errorf("reading from udp %w", errCorruptedMessage)
 	}
 
 	inputs := make([]types.Input, size)
 	for i := range len(inputs) {
-		err = inputs[i].UnmarshalBinary(buf[2+i*types.InputSize : 2+(i+1)*types.InputSize])
+		err = inputs[i].UnmarshalBinary(body[2+i*types.InputSize : 2+(i+1)*types.InputSize])
 		if err != nil {
-			return nil, nil, fmt.Errorf("unmarshaling input #%d: %w", i, err)
+			return nil, fmt.Errorf("unmarshaling input #%d: %w", i, err)
 		}
 	}
 
-	return inputs, addr, nil
+	return inputs, nil
 }
 
-func ackInput(conn net.PacketConn, addr net.Addr, input types.Input) error {
+func ackInput(conn *gameconn.Conn, addr net.Addr, input types.Input) error {
 	lastIndexData := make([]byte, 4)
 	_, err := binary.Encode(lastIndexData, binary.BigEndian, input.Index)
 	if err != nil {
 		panic("data should have been large enough")
 	}
 
-	_, err = conn.WriteTo(lastIndexData, addr)
+	err = conn.Send(addr, &gameconn.Message{
+		Scope: types.ScopeInputAck,
+		Body:  lastIndexData,
+	})
 	if err != nil {
 		return fmt.Errorf("writing to udp: %w", err)
 	}

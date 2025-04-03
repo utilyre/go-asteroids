@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"image/color"
 	"io"
 	"log/slog"
+	"multiplayer/internal/gameconn"
 	"multiplayer/internal/inputbuffer"
 	"multiplayer/internal/types"
 	"net"
@@ -40,12 +42,18 @@ func main() {
 type Game struct {
 	types.State
 	img         *ebiten.Image
-	conn        net.Conn
+	conn        *gameconn.Conn
+	serverAddr  net.Addr
 	inputBuffer inputbuffer.InputBuffer
 }
 
 func NewGame() (*Game, error) {
-	conn, err := net.Dial("udp", ":3000")
+	conn, err := gameconn.Listen(":")
+	if err != nil {
+		return nil, err
+	}
+
+	serverAddr, err := net.ResolveUDPAddr("udp", ":3000")
 	if err != nil {
 		return nil, err
 	}
@@ -53,12 +61,32 @@ func NewGame() (*Game, error) {
 	img := ebiten.NewImage(10, 10)
 	img.Fill(color.White)
 
-	return &Game{img: img, conn: conn}, nil
+	return &Game{
+		img:        img,
+		conn:       conn,
+		serverAddr: serverAddr,
+	}, nil
 }
 
 func (g *Game) Start() error {
 	go g.inputBufferSender()
-	go g.inputBufferFlusher()
+
+	g.conn.Handle(types.ScopeInputAck, func(sender net.Addr, msg *gameconn.Message) {
+		index, err := readAckIndex(bytes.NewReader(msg.Body))
+		if err != nil {
+			slog.Warn("failed to read ack index",
+				"sender", sender, "error", err)
+			return
+		}
+
+		err = g.inputBuffer.FlushUntil(index)
+		if err != nil {
+			slog.Error("failed to flush input buffer",
+				"until_index", index, "error", err)
+			return
+		}
+	})
+
 	return nil
 }
 
@@ -85,7 +113,7 @@ func readAckIndex(r io.Reader) (index uint32, err error) {
 	return index, nil
 }
 
-func (g *Game) inputBufferFlusher() {
+/* func (g *Game) inputBufferFlusher() {
 	for {
 		index, err := readAckIndex(g.conn)
 		if errors.Is(err, net.ErrClosed) {
@@ -105,21 +133,27 @@ func (g *Game) inputBufferFlusher() {
 			continue
 		}
 	}
-}
+} */
 
 func (g *Game) inputBufferSender() {
 	ticker := time.NewTicker(time.Second / 60)
 	defer ticker.Stop()
 	for ; ; <-ticker.C {
-		err := writeInputBuffer(g.conn, g.inputBuffer)
-		if errors.Is(err, net.ErrClosed) {
-			slog.Info("connection closed", "remote", g.conn.RemoteAddr())
-			return
-		}
+		var body bytes.Buffer
+
+		err := writeInputBuffer(&body, g.inputBuffer)
 		if err != nil {
-			slog.Warn("failed to write input buffer",
-				"remote", g.conn.RemoteAddr(), "error", err)
+			slog.Warn("failed to write input buffer", "error", err)
 			continue
+		}
+
+		err = g.conn.Send(g.serverAddr, &gameconn.Message{
+			Scope: types.ScopeInput,
+			Body:  body.Bytes(),
+		})
+		if errors.Is(err, net.ErrClosed) {
+			slog.Info("connection closed", "server_address", g.serverAddr)
+			return
 		}
 	}
 }
