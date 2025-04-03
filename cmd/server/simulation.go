@@ -1,0 +1,56 @@
+package main
+
+import (
+	"log/slog"
+	"math"
+	"multiplayer/internal/types"
+)
+
+type Simulation struct {
+	types.State
+	inputQueue *InputQueue
+}
+
+func NewSimulation(inputQueue *InputQueue) *Simulation {
+	return &Simulation{
+		inputQueue: inputQueue,
+	}
+}
+
+func (g *Simulation) Run() {
+	for {
+		input, open := g.inputQueue.Dequeue()
+		if !open {
+			break
+		}
+
+		g.Update(input)
+		slog.Info("game state changed", "x", g.Position.X, "y", g.Position.Y)
+	}
+}
+
+func (g *Simulation) Update(input types.Input) {
+	dx := 0.0
+	dy := 0.0
+	if input.Up {
+		dy += 1
+	}
+	if input.Left {
+		dx -= 1
+	}
+	if input.Down {
+		dy -= 1
+	}
+	if input.Right {
+		dx += 1
+	}
+
+	magnitude := math.Sqrt(dx*dx + dy*dy)
+	if magnitude > 0 {
+		dx /= magnitude
+		dy /= magnitude
+	}
+
+	g.Position.X += dx
+	g.Position.Y += dy
+}
