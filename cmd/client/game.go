@@ -33,6 +33,11 @@ func NewGame() (*Game, error) {
 		return nil, err
 	}
 
+	err = conn.Send(serverAddr, &gameconn.Message{Scope: gameconn.ScopeHi})
+	if err != nil {
+		return nil, fmt.Errorf("saying hi to server: %w", err)
+	}
+
 	img := ebiten.NewImage(10, 10)
 	img.Fill(color.White)
 
@@ -45,12 +50,26 @@ func NewGame() (*Game, error) {
 
 	go g.inputBufferSender()
 	g.conn.Handle(types.ScopeInputAck, g.inputAckHandler)
+	g.conn.Handle(types.ScopeSnapshot, g.snapshotHandler)
 
 	return g, nil
 }
 
+func (g *Game) snapshotHandler(sender net.Addr, msg *gameconn.Message) {
+	err := g.State.UnmarshalBinary(msg.Body)
+	slog.Info("snapshot received", "snapshot", g.State)
+	if err != nil {
+		slog.Error("failed to unmarshal snapshot", "error", err)
+	}
+}
+
 func (g *Game) Close() error {
-	err := g.conn.Close()
+	err := g.conn.Send(g.serverAddr, &gameconn.Message{Scope: gameconn.ScopeBye})
+	if err != nil {
+		return fmt.Errorf("saying bye to server: %w", err)
+	}
+
+	err = g.conn.Close()
 	if err != nil {
 		return fmt.Errorf("closing udp %s: %w", g.conn.LocalAddr(), err)
 	}

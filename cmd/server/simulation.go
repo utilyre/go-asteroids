@@ -8,13 +8,19 @@ import (
 
 type Simulation struct {
 	types.State
-	inputQueue *InputQueue
+	inputQueue    *InputQueue
+	snapshotQueue chan types.State
 }
 
 func NewSimulation(inputQueue *InputQueue) *Simulation {
 	return &Simulation{
-		inputQueue: inputQueue,
+		inputQueue:    inputQueue,
+		snapshotQueue: make(chan types.State, 1),
 	}
+}
+
+func (g *Simulation) Close() {
+	close(g.snapshotQueue)
 }
 
 func (g *Simulation) Run() {
@@ -26,20 +32,26 @@ func (g *Simulation) Run() {
 
 		g.Update(input)
 		slog.Info("game state changed", "x", g.Position.X, "y", g.Position.Y)
+
+		g.snapshotQueue <- g.State
 	}
+}
+
+func (g *Simulation) SnapshotQueue() <-chan types.State {
+	return g.snapshotQueue
 }
 
 func (g *Simulation) Update(input types.Input) {
 	dx := 0.0
 	dy := 0.0
 	if input.Up {
-		dy += 1
+		dy -= 1
 	}
 	if input.Left {
 		dx -= 1
 	}
 	if input.Down {
-		dy -= 1
+		dy += 1
 	}
 	if input.Right {
 		dx += 1

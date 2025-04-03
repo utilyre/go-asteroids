@@ -25,6 +25,7 @@ type Conn struct {
 	inner    net.PacketConn
 	addr     net.Addr
 	handlers map[byte]Handler
+	addrs    map[string]struct{}
 }
 
 func Listen(address string) (*Conn, error) {
@@ -44,7 +45,7 @@ func Listen(address string) (*Conn, error) {
 }
 
 func (conn *Conn) Close() error {
-	// TODO: make sure all the handlers are closed
+	// TODO: make sure all the handlers are finished
 	return conn.inner.Close()
 }
 
@@ -70,6 +71,31 @@ func (conn *Conn) Send(addr net.Addr, msg *Message) error {
 	return nil
 }
 
+func (conn *Conn) SendAll(msg *Message) error {
+	var errs []error
+
+	for addr := range conn.addrs {
+		actualAddr, err := net.ResolveUDPAddr("udp", addr)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+
+		err = conn.Send(actualAddr, msg)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+const (
+	ScopeHi  byte = 0
+	ScopeBye byte = 1
+)
+
 func (conn *Conn) listener() {
 	for {
 		msg, addr, err := conn.readMessage()
@@ -80,6 +106,19 @@ func (conn *Conn) listener() {
 		if err != nil {
 			slog.Error("failed to read message",
 				"address", conn.addr, "error", err)
+			continue
+		}
+
+		if msg.Scope == ScopeHi {
+			if conn.addrs == nil {
+				conn.addrs = map[string]struct{}{}
+			}
+
+			conn.addrs[addr.String()] = struct{}{}
+			continue
+		}
+		if msg.Scope == ScopeBye {
+			delete(conn.addrs, addr.String())
 			continue
 		}
 

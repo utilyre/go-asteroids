@@ -1,6 +1,10 @@
 package main
 
-import "log/slog"
+import (
+	"log/slog"
+	"multiplayer/internal/gameconn"
+	"multiplayer/internal/types"
+)
 
 func main() {
 	inputQueue := NewInputQueue()
@@ -14,5 +18,21 @@ func main() {
 	defer srv.Close()
 
 	simulation := NewSimulation(inputQueue)
+
+	go func() {
+		for snapshot := range simulation.SnapshotQueue() {
+			data, err := snapshot.MarshalBinary()
+			if err != nil {
+				slog.Error("failed to marshal snapshot", "error", err)
+				continue
+			}
+
+			srv.conn.SendAll(&gameconn.Message{
+				Scope: types.ScopeSnapshot,
+				Body:  data,
+			})
+		}
+	}()
+
 	simulation.Run()
 }

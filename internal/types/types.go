@@ -9,8 +9,9 @@ import (
 type Scope = byte
 
 const (
-	ScopeInput Scope = iota + 1
+	ScopeInput Scope = iota + 2
 	ScopeInputAck
+	ScopeSnapshot
 )
 
 const StateSize = 128
@@ -41,7 +42,7 @@ func (s *State) UnmarshalBinary(data []byte) error {
 	if err != nil {
 		panic("data should have been large enough")
 	}
-	_, err = binary.Decode(data, binary.BigEndian, &s.Position.Y)
+	_, err = binary.Decode(data[64:], binary.BigEndian, &s.Position.Y)
 	if err != nil {
 		panic("data should have been large enough")
 	}
