@@ -33,7 +33,7 @@ func (msg Message) Equal(other Message) bool {
 }
 
 func (msg Message) String() string {
-	return fmt.Sprintf("Message:v%d(%x)", msg.version, msg.Body)
+	return fmt.Sprintf("Message:v%d(%08b|%x)", msg.version, msg.flags, msg.Body)
 }
 
 const (
