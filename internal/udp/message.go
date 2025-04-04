@@ -20,15 +20,10 @@ func NewMessage(body []byte) Message {
 	}
 }
 
-func newMessage(body []byte, flags ...byte) Message {
-	var f byte
-	for _, flag := range flags {
-		f |= flag
-	}
-
+func newMessage(body []byte, flags byte) Message {
 	return Message{
 		version: msgVersion,
-		flags:   f,
+		flags:   flags,
 		Body:    body,
 	}
 }
