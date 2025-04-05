@@ -23,37 +23,39 @@ func makeListener(tb testing.TB) *udp.Listener {
 	return ln
 }
 
-func TestFuck(t *testing.T) {
-	server := makeListener(t)
-	t.Logf("server bound to udp %q", server.LocalAddr())
-	client := makeListener(t)
-	t.Logf("client bound to udp %q", client.LocalAddr())
+func TestListener(t *testing.T) {
+	t.Run("server:1 client:1", func(t *testing.T) {
+		server := makeListener(t)
+		t.Logf("server bound to udp %q", server.LocalAddr())
+		client := makeListener(t)
+		t.Logf("client bound to udp %q", client.LocalAddr())
 
-	err := client.Greet(server.LocalAddr())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	msg := udp.NewMessage([]byte("ping"))
-
-	done := make(chan struct{})
-	go func() {
-		envel := <-server.C
-		if addr := client.LocalAddr(); addr.String() != envel.Sender.String() {
-			t.Errorf("expected client %q; actual client %q", addr, envel.Sender)
+		err := client.Greet(server.LocalAddr())
+		if err != nil {
+			t.Fatal(err)
 		}
-		if !msg.Equal(envel.Message) {
-			t.Errorf("expected message %q; actual message %q", msg, envel.Message)
+
+		msg := udp.NewMessage([]byte("ping"))
+
+		done := make(chan struct{})
+		go func() {
+			envel := <-server.C
+			if addr := client.LocalAddr(); addr.String() != envel.Sender.String() {
+				t.Errorf("expected client %q; actual client %q", addr, envel.Sender)
+			}
+			if !msg.Equal(envel.Message) {
+				t.Errorf("expected message %q; actual message %q", msg, envel.Message)
+			}
+			close(done)
+		}()
+
+		t.Logf("sending message %q to server", msg)
+		err = client.Send(server.LocalAddr(), msg)
+		if err != nil {
+			t.Fatal(err)
 		}
-		close(done)
-	}()
 
-	t.Logf("sending message %q to server", msg)
-	err = client.Send(server.LocalAddr(), msg)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Log("waiting for server to receive message")
-	<-done
+		t.Log("waiting for server to receive message")
+		<-done
+	})
 }
