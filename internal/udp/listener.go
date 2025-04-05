@@ -4,10 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"net"
-	"slices"
 )
+
+// TODO: make everything context-aware
 
 func init() {
 	// slog.SetLogLoggerLevel(slog.LevelDebug)
@@ -22,10 +22,8 @@ type Listener struct {
 	C chan Envelope
 
 	conn    net.PacketConn
-	clients map[string]struct{} // set of active addrs
-	//          ^ TODO: consider using uuid.UUID
-	servers map[string]struct{}
-	//          ^ TODO: consider using uuid.UUID
+	clients map[string]struct{} // set of active client addrs
+	servers map[string]struct{} // set of active server addrs
 	// FIX: use sync.Mutex for maps
 }
 
@@ -66,11 +64,6 @@ func (ln *Listener) Close() error {
 }
 
 func (ln *Listener) LocalAddr() net.Addr { return ln.conn.LocalAddr() }
-
-func (ln *Listener) RemoteAddrs() []string {
-	//                            ^ TODO: convert to net.Addr, or even better uuid.UUID
-	return slices.Collect(maps.Keys(ln.clients))
-}
 
 var (
 	ErrAlreadyGreeted = errors.New("already greeted")

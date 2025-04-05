@@ -1,8 +1,13 @@
 package udp_test
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"multiplayer/internal/udp"
 	"testing"
+
+	"golang.org/x/sync/errgroup"
 )
 
 func makeListener(tb testing.TB) *udp.Listener {
@@ -57,5 +62,67 @@ func TestListener(t *testing.T) {
 
 		t.Log("waiting for server to receive message")
 		<-done
+	})
+
+	t.Run("server:1 client:2", func(t *testing.T) {
+		server := makeListener(t)
+		t.Logf("server bound to udp %q", server.LocalAddr())
+		client1 := makeListener(t)
+		t.Logf("client1 bound to udp %q", client1.LocalAddr())
+		client2 := makeListener(t)
+		t.Logf("client2 bound to udp %q", client2.LocalAddr())
+
+		g, _ := errgroup.WithContext(context.TODO())
+		g.Go(func() error { return client1.Greet(server.LocalAddr()) })
+		g.Go(func() error { return client2.Greet(server.LocalAddr()) })
+		err := g.Wait()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		msgc := make(chan udp.Message, 1)
+		go func() {
+			defer close(msgc)
+			for i := range 10 {
+				msgc <- udp.NewMessage([]byte(fmt.Sprintf("ping %d", i)))
+			}
+		}()
+
+		g, _ = errgroup.WithContext(context.TODO())
+		for range 2 {
+			g.Go(func() error {
+				var errs []error
+				for msg := range msgc {
+					err := client1.Send(server.LocalAddr(), msg)
+					if err != nil {
+						errs = append(errs, err)
+					}
+				}
+				return errors.Join(errs...)
+			})
+		}
+		for range 2 {
+			g.Go(func() error {
+				var errs []error
+				for msg := range msgc {
+					err := client2.Send(server.LocalAddr(), msg)
+					if err != nil {
+						errs = append(errs, err)
+					}
+				}
+				return errors.Join(errs...)
+			})
+		}
+		g.Go(func() error {
+			for range 10 {
+				msg := <-server.C
+				t.Logf("received message %q from %q", msg.Message, msg.Sender)
+			}
+			return nil
+		})
+		err = g.Wait()
+		if err != nil {
+			t.Fatal(err)
+		}
 	})
 }
