@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sync"
 )
 
 // TODO: make everything context-aware
@@ -21,10 +22,10 @@ type Envelope struct {
 type Listener struct {
 	C chan Envelope
 
-	conn    net.PacketConn
-	clients map[string]struct{} // set of active client addrs
-	servers map[string]struct{} // set of active server addrs
-	// FIX: use sync.Mutex for maps
+	conn        net.PacketConn
+	clients     map[string]struct{} // set of active client addrs
+	servers     map[string]struct{} // set of active server addrs
+	serversLock sync.RWMutex
 }
 
 func Listen(addr string) (*Listener, error) {
@@ -45,13 +46,18 @@ func Listen(addr string) (*Listener, error) {
 }
 
 func (ln *Listener) Close() error {
+	ln.serversLock.RLock()
 	for addr := range ln.servers {
+		ln.serversLock.RUnlock()
 		udpAddr, _ := net.ResolveUDPAddr("udp", addr)
 		err := ln.Farewell(udpAddr)
 		if err != nil {
+			ln.serversLock.RUnlock()
 			return fmt.Errorf("farewelling servers: %w", err)
 		}
+		ln.serversLock.RLock()
 	}
+	ln.serversLock.RUnlock()
 
 	err := ln.conn.Close()
 	if err != nil {
@@ -71,30 +77,44 @@ var (
 )
 
 func (ln *Listener) Greet(dest net.Addr) error {
+	ln.serversLock.RLock()
 	if _, exists := ln.servers[dest.String()]; exists {
+		ln.serversLock.RUnlock()
 		return ErrAlreadyGreeted
 	}
+	ln.serversLock.RUnlock()
+	slog.Debug("greet: read from servers")
 
 	msg := newMessage(nil, flagHi)
 	err := ln.Send(dest, msg)
 	if err != nil {
 		return err
 	}
+	ln.serversLock.Lock()
 	ln.servers[dest.String()] = struct{}{}
+	ln.serversLock.Unlock()
+	slog.Debug("greet: wrote to servers")
 	return nil
 }
 
 func (ln *Listener) Farewell(dest net.Addr) error {
+	ln.serversLock.RLock()
 	if _, exists := ln.servers[dest.String()]; !exists {
+		ln.serversLock.RUnlock()
 		return ErrServerNotFound
 	}
+	ln.serversLock.RUnlock()
+	slog.Debug("farewell: read from servers")
 
 	msg := newMessage(nil, flagBye)
 	err := ln.Send(dest, msg)
 	if err != nil {
 		return err
 	}
+	ln.serversLock.Lock()
 	delete(ln.servers, dest.String())
+	ln.serversLock.Unlock()
+	slog.Debug("farewell: wrote to servers")
 	return nil
 }
 
