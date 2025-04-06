@@ -67,7 +67,7 @@ func TestListener(t *testing.T) {
 			for test := range tests {
 				mu.Unlock()
 				msg := udp.NewMessage([]byte(test))
-				err = client.Send(ctx, server.LocalAddr(), msg)
+				err = client.TrySend(ctx, server.LocalAddr(), msg)
 				if err != nil {
 					return err
 				}

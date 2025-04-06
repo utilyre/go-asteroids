@@ -85,7 +85,7 @@ func (ln *Listener) Greet(ctx context.Context, dest net.Addr) error {
 	slog.Debug("greet: read from servers")
 
 	msg := newMessage(nil, flagHi)
-	err := ln.Send(ctx, dest, msg) // TODO: make sure it's been received (requires ack)
+	err := ln.TrySend(ctx, dest, msg) // TODO: make sure it's been received (requires ack)
 	if err != nil {
 		return err
 	}
@@ -103,7 +103,7 @@ func (ln *Listener) Farewell(ctx context.Context, dest net.Addr) error {
 	slog.Debug("farewell: read from servers")
 
 	msg := newMessage(nil, flagBye)
-	err := ln.Send(ctx, dest, msg)
+	err := ln.TrySend(ctx, dest, msg)
 	if err != nil {
 		return err
 	}
@@ -121,11 +121,11 @@ func (ln *Listener) serverExists(addr string) bool {
 	return exists
 }
 
-// TODO: rename Listener.Send to TrySend (does not use ack)
-// TODO: add Listener.Send (uses ack)
-// TODO: add Listener.SendAll (sends to all clients)
+// TODO: add Listener.Send (w/ ack)
+// TODO: add Listener.SendAll (sends to all clients w/ ack)
+// TODO: add Listener.TrySendAll (sends to all clients wo/ ack)
 
-func (ln *Listener) Send(ctx context.Context, dest net.Addr, msg Message) error {
+func (ln *Listener) TrySend(ctx context.Context, dest net.Addr, msg Message) error {
 	data, err := msg.MarshalBinary()
 	if err != nil {
 		return fmt.Errorf("marshaling message: %w", err)
