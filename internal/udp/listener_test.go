@@ -83,7 +83,7 @@ func TestListener(t *testing.T) {
 				select {
 				case <-ctx.Done():
 					break
-				case envel := <-server.Chan():
+				case envel := <-server.Inbox():
 					t.Logf("received message %q from client", envel.Message)
 					if addr := client.LocalAddr(); addr.String() != envel.Sender.String() {
 						t.Errorf("expected client %q; actual client %q", addr, envel.Sender)

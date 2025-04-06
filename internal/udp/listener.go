@@ -69,7 +69,7 @@ func (ln *Listener) Close(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (ln *Listener) Chan() <-chan Envelope { return ln.msgc }
+func (ln *Listener) Inbox() <-chan Envelope { return ln.msgc }
 
 func (ln *Listener) LocalAddr() net.Addr { return ln.conn.LocalAddr() }
 
