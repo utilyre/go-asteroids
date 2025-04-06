@@ -6,6 +6,7 @@ import (
 	"multiplayer/internal/udp"
 	"sync"
 	"testing"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -19,7 +20,10 @@ func makeListener(tb testing.TB) *udp.Listener {
 	}
 
 	tb.Cleanup(func() {
-		err := ln.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+
+		err := ln.Close(ctx)
 		if err != nil {
 			tb.Fatal(err)
 		}
@@ -44,23 +48,26 @@ func TestListener(t *testing.T) {
 		}
 		n := len(tests)
 
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
 		server := makeListener(t)
 		t.Logf("server bound to udp %q", server.LocalAddr())
 		client := makeListener(t)
 		t.Logf("client bound to udp %q", client.LocalAddr())
 
-		err := client.Greet(server.LocalAddr())
+		err := client.Greet(ctx, server.LocalAddr())
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		g, _ := errgroup.WithContext(context.TODO())
+		g, ctx := errgroup.WithContext(ctx)
 		g.Go(func() error {
 			mu.Lock()
 			for test := range tests {
 				mu.Unlock()
 				msg := udp.NewMessage([]byte(test))
-				err = client.Send(server.LocalAddr(), msg)
+				err = client.Send(ctx, server.LocalAddr(), msg)
 				if err != nil {
 					return err
 				}
@@ -73,18 +80,22 @@ func TestListener(t *testing.T) {
 
 		g.Go(func() error {
 			for range n {
-				envel := <-server.Chan()
-				t.Logf("received message %q from client", envel.Message)
-				if addr := client.LocalAddr(); addr.String() != envel.Sender.String() {
-					t.Errorf("expected client %q; actual client %q", addr, envel.Sender)
+				select {
+				case <-ctx.Done():
+					break
+				case envel := <-server.Chan():
+					t.Logf("received message %q from client", envel.Message)
+					if addr := client.LocalAddr(); addr.String() != envel.Sender.String() {
+						t.Errorf("expected client %q; actual client %q", addr, envel.Sender)
+					}
+					body := string(envel.Message.Body)
+					mu.Lock()
+					if _, exists := tests[body]; !exists {
+						t.Errorf("unexpected message %q", envel.Message)
+					}
+					delete(tests, body)
+					mu.Unlock()
 				}
-				body := string(envel.Message.Body)
-				mu.Lock()
-				if _, exists := tests[body]; !exists {
-					t.Errorf("unexpected message %q", envel.Message)
-				}
-				delete(tests, body)
-				mu.Unlock()
 			}
 
 			if len(tests) > 0 {
@@ -103,20 +114,23 @@ func TestListener(t *testing.T) {
 	t.Run("race condition in greet and farewell", func(t *testing.T) {
 		const n = 10 // number of goroutines
 
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
 		server := makeListener(t)
 		t.Logf("server bound to udp %q", server.LocalAddr())
 		client := makeListener(t)
 		t.Logf("client bound to udp %q", client.LocalAddr())
 
-		g, _ := errgroup.WithContext(context.TODO())
+		g, ctx := errgroup.WithContext(ctx)
 
 		for range n {
 			g.Go(func() error {
-				err := client.Greet(server.LocalAddr())
+				err := client.Greet(ctx, server.LocalAddr())
 				if err != nil {
 					return err
 				}
-				err = client.Farewell(server.LocalAddr())
+				err = client.Farewell(ctx, server.LocalAddr())
 				if err != nil {
 					return err
 				}

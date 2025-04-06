@@ -1,14 +1,14 @@
 package udp
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"sync"
+	"time"
 )
-
-// TODO: make everything context-aware
 
 func init() {
 	// slog.SetLogLoggerLevel(slog.LevelDebug)
@@ -44,14 +44,14 @@ func Listen(addr string) (*Listener, error) {
 	return ln, nil
 }
 
-func (ln *Listener) Close() error {
+func (ln *Listener) Close(ctx context.Context) error {
 	var errs []error
 
 	ln.serversLock.RLock()
 	for addr := range ln.servers {
 		ln.serversLock.RUnlock()
 		udpAddr, _ := net.ResolveUDPAddr("udp", addr)
-		err := ln.Farewell(udpAddr)
+		err := ln.Farewell(ctx, udpAddr)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("farewelling servers: %w", err))
 		}
@@ -78,14 +78,14 @@ var (
 	ErrServerNotFound = errors.New("server not found")
 )
 
-func (ln *Listener) Greet(dest net.Addr) error {
+func (ln *Listener) Greet(ctx context.Context, dest net.Addr) error {
 	if ln.serverExists(dest.String()) {
 		return ErrAlreadyGreeted
 	}
 	slog.Debug("greet: read from servers")
 
 	msg := newMessage(nil, flagHi)
-	err := ln.Send(dest, msg) // TODO: make sure it's been received (requires ack)
+	err := ln.Send(ctx, dest, msg) // TODO: make sure it's been received (requires ack)
 	if err != nil {
 		return err
 	}
@@ -96,14 +96,14 @@ func (ln *Listener) Greet(dest net.Addr) error {
 	return nil
 }
 
-func (ln *Listener) Farewell(dest net.Addr) error {
+func (ln *Listener) Farewell(ctx context.Context, dest net.Addr) error {
 	if !ln.serverExists(dest.String()) {
 		return ErrServerNotFound
 	}
 	slog.Debug("farewell: read from servers")
 
 	msg := newMessage(nil, flagBye)
-	err := ln.Send(dest, msg)
+	err := ln.Send(ctx, dest, msg)
 	if err != nil {
 		return err
 	}
@@ -125,15 +125,46 @@ func (ln *Listener) serverExists(addr string) bool {
 // TODO: add Listener.Send (uses ack)
 // TODO: add Listener.SendAll (sends to all clients)
 
-func (ln *Listener) Send(dest net.Addr, msg Message) error {
+func (ln *Listener) Send(ctx context.Context, dest net.Addr, msg Message) error {
 	data, err := msg.MarshalBinary()
 	if err != nil {
 		return fmt.Errorf("marshaling message: %w", err)
 	}
 
+	// set write deadline based on ctx
+	if deadline, ok := ctx.Deadline(); ok {
+		err = ln.conn.SetDeadline(deadline)
+		if err != nil {
+			return fmt.Errorf("setting write deadline: %w", err)
+		}
+	}
+	done := make(chan struct{})
+	defer close(done)
+	var goroutineErr error
+	go func() {
+		select {
+		case <-ctx.Done():
+			goroutineErr = ln.conn.SetWriteDeadline(time.Now())
+			<-done // proceed to handling goroutineErr
+		case <-done:
+		}
+	}()
+
 	_, err = ln.conn.WriteTo(data, dest)
 	if err != nil {
 		return fmt.Errorf("writing message to udp %q: %w", dest, err)
+	}
+
+	err = ln.conn.SetWriteDeadline(time.Time{})
+	if err != nil {
+		return fmt.Errorf("resetting write deadline: %w", err)
+	}
+
+	slog.Debug("here: waiting on done")
+	done <- struct{}{} // close(done) does not wait until the goroutine catches up
+	slog.Debug("here: done sent*")
+	if goroutineErr != nil {
+		return fmt.Errorf("setting write deadline: %w", err)
 	}
 
 	return nil
