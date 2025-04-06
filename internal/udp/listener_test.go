@@ -2,10 +2,9 @@ package udp_test
 
 import (
 	"context"
-	"math/rand/v2"
+	"errors"
 	"multiplayer/internal/udp"
 	"testing"
-	"time"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -26,11 +25,6 @@ func makeListener(tb testing.TB) *udp.Listener {
 	})
 
 	return ln
-}
-
-func randSleep() {
-	dt := rand.N(300) + 100
-	time.Sleep(time.Duration(dt) * time.Millisecond)
 }
 
 func TestListener(t *testing.T) {
@@ -70,37 +64,31 @@ func TestListener(t *testing.T) {
 	})
 
 	t.Run("race condition in greet and farewell", func(t *testing.T) {
+		const n = 10 // number of goroutines
+
 		server := makeListener(t)
 		t.Logf("server bound to udp %q", server.LocalAddr())
 		client := makeListener(t)
 		t.Logf("client bound to udp %q", client.LocalAddr())
 
 		g, _ := errgroup.WithContext(context.TODO())
-		g.Go(func() error {
-			err := client.Greet(server.LocalAddr())
-			if err != nil {
-				return err
-			}
-			err = client.Farewell(server.LocalAddr())
-			if err != nil {
-				return err
-			}
-			return nil
-		})
-		g.Go(func() error {
-			err := client.Greet(server.LocalAddr())
-			if err != nil {
-				return err
-			}
-			err = client.Farewell(server.LocalAddr())
-			if err != nil {
-				return err
-			}
-			return nil
-		})
+
+		for range n {
+			g.Go(func() error {
+				err := client.Greet(server.LocalAddr())
+				if err != nil {
+					return err
+				}
+				err = client.Farewell(server.LocalAddr())
+				if err != nil {
+					return err
+				}
+				return nil
+			})
+		}
 
 		err := g.Wait()
-		if err != nil {
+		if err != nil && !errors.Is(err, udp.ErrAlreadyGreeted) {
 			t.Fatal(err)
 		}
 	})
