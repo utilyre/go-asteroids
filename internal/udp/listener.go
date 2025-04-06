@@ -50,7 +50,7 @@ func (ln *Listener) Close(ctx context.Context) error {
 	ln.serversLock.RLock()
 	for addr := range ln.servers {
 		ln.serversLock.RUnlock()
-		udpAddr, _ := net.ResolveUDPAddr("udp", addr)
+		udpAddr := must(net.ResolveUDPAddr("udp", addr))
 		err := ln.Farewell(ctx, udpAddr)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("farewelling servers: %w", err))
@@ -127,7 +127,7 @@ func (ln *Listener) serverExists(addr string) bool {
 func (ln *Listener) TrySendAll(ctx context.Context, msg Message) error {
 	var errs []error
 	for addr := range ln.clients {
-		udpAddr, _ := net.ResolveUDPAddr("udp", addr)
+		udpAddr := must(net.ResolveUDPAddr("udp", addr))
 		err := ln.TrySend(ctx, udpAddr, msg)
 		if err != nil {
 			errs = append(errs, err)
