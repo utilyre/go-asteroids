@@ -123,7 +123,19 @@ func (ln *Listener) serverExists(addr string) bool {
 
 // TODO: add Listener.Send (w/ ack)
 // TODO: add Listener.SendAll (sends to all clients w/ ack)
-// TODO: add Listener.TrySendAll (sends to all clients wo/ ack)
+
+func (ln *Listener) TrySendAll(ctx context.Context, msg Message) error {
+	var errs []error
+	for addr := range ln.clients {
+		udpAddr, _ := net.ResolveUDPAddr("udp", addr)
+		err := ln.TrySend(ctx, udpAddr, msg)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+	}
+	return errors.Join(errs...)
+}
 
 func (ln *Listener) TrySend(ctx context.Context, dest net.Addr, msg Message) error {
 	data, err := msg.MarshalBinary()
