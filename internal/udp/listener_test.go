@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"multiplayer/internal/udp"
+	"sync"
 	"testing"
 
 	"golang.org/x/sync/errgroup"
@@ -29,6 +30,20 @@ func makeListener(tb testing.TB) *udp.Listener {
 
 func TestListener(t *testing.T) {
 	t.Run("simple message passing one to one", func(t *testing.T) {
+		var mu sync.Mutex
+		tests := map[string]struct{}{
+			"ping 1": {},
+			"ping 2": {},
+			"ping 3": {},
+			"ping 4": {},
+			"ping 5": {},
+			"ping 6": {},
+			"ping 7": {},
+			"ping 8": {},
+			"ping 9": {},
+		}
+		n := len(tests)
+
 		server := makeListener(t)
 		t.Logf("server bound to udp %q", server.LocalAddr())
 		client := makeListener(t)
@@ -39,28 +54,50 @@ func TestListener(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		msg := udp.NewMessage([]byte("ping"))
-
-		done := make(chan struct{})
-		go func() {
-			envel := <-server.C
-			if addr := client.LocalAddr(); addr.String() != envel.Sender.String() {
-				t.Errorf("expected client %q; actual client %q", addr, envel.Sender)
+		g, _ := errgroup.WithContext(context.TODO())
+		g.Go(func() error {
+			mu.Lock()
+			for test := range tests {
+				mu.Unlock()
+				msg := udp.NewMessage([]byte(test))
+				err = client.Send(server.LocalAddr(), msg)
+				if err != nil {
+					return err
+				}
+				t.Logf("sent message %q to server", msg)
+				mu.Lock()
 			}
-			if !msg.Equal(envel.Message) {
-				t.Errorf("expected message %q; actual message %q", msg, envel.Message)
-			}
-			close(done)
-		}()
+			mu.Unlock()
+			return nil
+		})
 
-		t.Logf("sending message %q to server", msg)
-		err = client.Send(server.LocalAddr(), msg)
+		g.Go(func() error {
+			for range n {
+				envel := <-server.Chan()
+				t.Logf("received message %q from client", envel.Message)
+				if addr := client.LocalAddr(); addr.String() != envel.Sender.String() {
+					t.Errorf("expected client %q; actual client %q", addr, envel.Sender)
+				}
+				body := string(envel.Message.Body)
+				mu.Lock()
+				if _, exists := tests[body]; !exists {
+					t.Errorf("unexpected message %q", envel.Message)
+				}
+				delete(tests, body)
+				mu.Unlock()
+			}
+
+			if len(tests) > 0 {
+				t.Errorf("missed messages %#v", tests)
+			}
+
+			return nil
+		})
+
+		err = g.Wait()
 		if err != nil {
 			t.Fatal(err)
 		}
-
-		t.Log("waiting for server to receive message")
-		<-done
 	})
 
 	t.Run("race condition in greet and farewell", func(t *testing.T) {
