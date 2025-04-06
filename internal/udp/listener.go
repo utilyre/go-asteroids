@@ -45,13 +45,15 @@ func Listen(addr string) (*Listener, error) {
 }
 
 func (ln *Listener) Close() error {
+	var errs []error
+
 	ln.serversLock.RLock()
 	for addr := range ln.servers {
 		ln.serversLock.RUnlock()
 		udpAddr, _ := net.ResolveUDPAddr("udp", addr)
 		err := ln.Farewell(udpAddr)
 		if err != nil {
-			return fmt.Errorf("farewelling servers: %w", err)
+			errs = append(errs, fmt.Errorf("farewelling servers: %w", err))
 		}
 		ln.serversLock.RLock()
 	}
@@ -59,12 +61,12 @@ func (ln *Listener) Close() error {
 
 	err := ln.conn.Close()
 	if err != nil {
-		return fmt.Errorf("closing udp %q: %w", ln.LocalAddr(), err)
+		errs = append(errs, fmt.Errorf("closing udp %q: %w", ln.LocalAddr(), err))
 	}
 
 	close(ln.msgc)
 
-	return nil
+	return errors.Join(errs...)
 }
 
 func (ln *Listener) Chan() <-chan Envelope { return ln.msgc }
@@ -77,16 +79,13 @@ var (
 )
 
 func (ln *Listener) Greet(dest net.Addr) error {
-	ln.serversLock.RLock()
-	if _, exists := ln.servers[dest.String()]; exists {
-		ln.serversLock.RUnlock()
+	if ln.serverExists(dest.String()) {
 		return ErrAlreadyGreeted
 	}
-	ln.serversLock.RUnlock()
 	slog.Debug("greet: read from servers")
 
 	msg := newMessage(nil, flagHi)
-	err := ln.Send(dest, msg)
+	err := ln.Send(dest, msg) // TODO: make sure it's been received (requires ack)
 	if err != nil {
 		return err
 	}
@@ -98,12 +97,9 @@ func (ln *Listener) Greet(dest net.Addr) error {
 }
 
 func (ln *Listener) Farewell(dest net.Addr) error {
-	ln.serversLock.RLock()
-	if _, exists := ln.servers[dest.String()]; !exists {
-		ln.serversLock.RUnlock()
+	if !ln.serverExists(dest.String()) {
 		return ErrServerNotFound
 	}
-	ln.serversLock.RUnlock()
 	slog.Debug("farewell: read from servers")
 
 	msg := newMessage(nil, flagBye)
@@ -117,6 +113,17 @@ func (ln *Listener) Farewell(dest net.Addr) error {
 	slog.Debug("farewell: wrote to servers")
 	return nil
 }
+
+func (ln *Listener) serverExists(addr string) bool {
+	ln.serversLock.RLock()
+	defer ln.serversLock.RUnlock()
+	_, exists := ln.servers[addr]
+	return exists
+}
+
+// TODO: rename Listener.Send to TrySend (does not use ack)
+// TODO: add Listener.Send (uses ack)
+// TODO: add Listener.SendAll (sends to all clients)
 
 func (ln *Listener) Send(dest net.Addr, msg Message) error {
 	data, err := msg.MarshalBinary()
@@ -139,7 +146,7 @@ func (ln *Listener) readLoop() {
 	for {
 		n, addr, readErr := ln.conn.ReadFrom(buf)
 		if errors.Is(readErr, net.ErrClosed) {
-			// TODO: remove from ln.clients if not already
+			// cannot remove from ln.clients since addr is nil
 			slog.Info("connection closed", "address", addr)
 			break
 		}
