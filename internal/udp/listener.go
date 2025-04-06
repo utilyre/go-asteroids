@@ -15,17 +15,16 @@ func init() {
 }
 
 type Envelope struct {
-	Sender net.Addr
-	Message
+	Sender  net.Addr
+	Message Message
 }
 
 type Listener struct {
-	C chan Envelope
-
 	conn        net.PacketConn
 	clients     map[string]struct{} // set of active client addrs
 	servers     map[string]struct{} // set of active server addrs
 	serversLock sync.RWMutex
+	msgc        chan Envelope
 }
 
 func Listen(addr string) (*Listener, error) {
@@ -35,7 +34,7 @@ func Listen(addr string) (*Listener, error) {
 	}
 
 	ln := &Listener{
-		C:       make(chan Envelope, 1),
+		msgc:    make(chan Envelope, 1),
 		conn:    conn,
 		clients: map[string]struct{}{},
 		servers: map[string]struct{}{},
@@ -52,7 +51,6 @@ func (ln *Listener) Close() error {
 		udpAddr, _ := net.ResolveUDPAddr("udp", addr)
 		err := ln.Farewell(udpAddr)
 		if err != nil {
-			ln.serversLock.RUnlock()
 			return fmt.Errorf("farewelling servers: %w", err)
 		}
 		ln.serversLock.RLock()
@@ -64,10 +62,12 @@ func (ln *Listener) Close() error {
 		return fmt.Errorf("closing udp %q: %w", ln.LocalAddr(), err)
 	}
 
-	close(ln.C)
+	close(ln.msgc)
 
 	return nil
 }
+
+func (ln *Listener) Chan() <-chan Envelope { return ln.msgc }
 
 func (ln *Listener) LocalAddr() net.Addr { return ln.conn.LocalAddr() }
 
@@ -169,7 +169,7 @@ func (ln *Listener) readLoop() {
 			continue
 		}
 
-		ln.C <- Envelope{
+		ln.msgc <- Envelope{
 			Sender:  addr,
 			Message: msg,
 		}
