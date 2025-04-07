@@ -1,9 +1,10 @@
 package main
 
 import (
+	"context"
 	"log/slog"
-	"multiplayer/internal/gameconn"
 	"multiplayer/internal/types"
+	"multiplayer/internal/udp"
 )
 
 func main() {
@@ -15,7 +16,7 @@ func main() {
 		slog.Error("failed to instantiate game server", "error", err)
 		return
 	}
-	defer srv.Close()
+	defer srv.Close(context.TODO())
 
 	simulation := NewSimulation(inputQueue)
 
@@ -27,10 +28,12 @@ func main() {
 				continue
 			}
 
-			srv.conn.SendAll(&gameconn.Message{
-				Scope: types.ScopeSnapshot,
-				Body:  data,
-			})
+			msg := udp.NewMessageWithLabel(data, types.ScopeSnapshot)
+			err = srv.ln.TrySendAll(context.TODO(), msg)
+			if err != nil {
+				slog.Error("failed to send snapshot", "error", err)
+				continue
+			}
 		}
 	}()
 

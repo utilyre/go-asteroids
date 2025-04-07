@@ -23,6 +23,7 @@ func NewMux(ln *Listener) *Mux {
 	}
 }
 
+// NOTE: does not close mux.ln
 func (mux *Mux) Close() error {
 	for _, ch := range mux.channels {
 		close(ch)

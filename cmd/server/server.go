@@ -1,41 +1,93 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log/slog"
-	"multiplayer/internal/gameconn"
 	"multiplayer/internal/types"
-	"net"
+	"multiplayer/internal/udp"
 	"time"
 )
 
 type GameServer struct {
-	conn       *gameconn.Conn
-	inputQueue *InputQueue
+	ln              *udp.Listener
+	mux             *udp.Mux
+	muxInputChannel <-chan udp.Envelope
+	inputQueue      *InputQueue
 }
 
 func NewGameServer(addr string, inputQueue *InputQueue) (*GameServer, error) {
-	conn, err := gameconn.Listen(addr)
+	ln, err := udp.Listen(addr)
 	if err != nil {
 		return nil, fmt.Errorf("binding to udp %s: %w", addr, err)
 	}
+	mux := udp.NewMux(ln)
+	muxInputChannel := mux.Subscribe(types.ScopeInput, 1)
+	go mux.Run()
 
-	srv := &GameServer{conn: conn, inputQueue: inputQueue}
-	srv.conn.Handle(types.ScopeInput, srv.inputHandler())
-
+	srv := &GameServer{
+		ln:              ln,
+		mux:             mux,
+		muxInputChannel: muxInputChannel,
+		inputQueue:      inputQueue,
+	}
+	go srv.inputLoop()
 	return srv, nil
 }
 
-func (srv *GameServer) Close() error {
-	err := srv.conn.Close()
+func (srv *GameServer) Close(ctx context.Context) error {
+	err := srv.mux.Close()
 	if err != nil {
-		return fmt.Errorf("closing udp conn %q: %w", srv.conn.LocalAddr(), err)
+		return fmt.Errorf("close mux: %w", err)
+	}
+	err = srv.ln.Close(ctx)
+	if err != nil {
+		return fmt.Errorf("close ln: %w", err)
 	}
 	return nil
 }
 
-func (srv *GameServer) inputHandler() gameconn.Handler {
+func (srv *GameServer) inputLoop() {
+	const inputRate = 15
+	lastMessage := time.Now()
+
+	for envel := range srv.muxInputChannel {
+		inputs, err := parseInputMessageBody(envel.Message.Body)
+		if err != nil {
+			slog.Warn("failed to read input message",
+				"sender", envel.Sender, "error", err)
+			return
+		}
+
+		// drop messages that are received faster than inputRate
+		if dt := time.Since(lastMessage); dt < time.Second/inputRate {
+			return
+		}
+		lastMessage = time.Now()
+
+		if len(inputs) > 0 {
+			lastInput := inputs[len(inputs)-1]
+			body := make([]byte, 4)
+			_, _ = binary.Encode(body, binary.BigEndian, lastInput.Index)
+
+			msg := udp.NewMessageWithLabel(body, types.ScopeInputAck)
+
+			err = srv.ln.TrySend(context.TODO(), envel.Sender, msg)
+			if err != nil {
+				slog.Warn("failed to acknowledge last input",
+					"sender", envel.Sender, "error", err)
+				return
+			}
+			slog.Info("acknowledged last input", "index", lastInput.Index)
+		}
+
+		srv.inputQueue.ProcessInputs(inputs)
+	}
+}
+
+/* func (srv *GameServer) inputHandler() gameconn.Handler {
 	const inputRate = 15
 
 	lastMessage := time.Now()
@@ -72,11 +124,13 @@ func (srv *GameServer) inputHandler() gameconn.Handler {
 
 		srv.inputQueue.ProcessInputs(inputs)
 	}
-}
+} */
+
+var ErrCorruptedMessage = errors.New("message corrupted")
 
 func parseInputMessageBody(body []byte) ([]types.Input, error) {
 	if len(body) < 2 {
-		return nil, gameconn.ErrCorruptedMessage
+		return nil, ErrCorruptedMessage
 	}
 
 	var size uint16
@@ -85,7 +139,7 @@ func parseInputMessageBody(body []byte) ([]types.Input, error) {
 		panic("message should have been large enough")
 	}
 	if 2+int(size)*types.InputSize > len(body) {
-		return nil, gameconn.ErrCorruptedMessage
+		return nil, ErrCorruptedMessage
 	}
 
 	inputs := make([]types.Input, size)

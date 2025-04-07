@@ -1,13 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"image/color"
 	"log/slog"
-	"multiplayer/internal/gameconn"
 	"multiplayer/internal/types"
+	"multiplayer/internal/udp"
 	"net"
 	"time"
 
@@ -16,24 +17,31 @@ import (
 
 type Game struct {
 	types.State
-	img         *ebiten.Image
-	conn        *gameconn.Conn
-	serverAddr  net.Addr
-	inputBuffer *InputBuffer
+	img                *ebiten.Image
+	ln                 *udp.Listener
+	mux                *udp.Mux
+	muxInputAckChannel <-chan udp.Envelope
+	muxSnapshotChannel <-chan udp.Envelope
+	serverAddr         net.Addr
+	inputBuffer        *InputBuffer
 }
 
 func NewGame() (*Game, error) {
-	conn, err := gameconn.Listen(":")
+	ln, err := udp.Listen(":")
 	if err != nil {
 		return nil, err
 	}
+	mux := udp.NewMux(ln)
+	muxInputAckChannel := mux.Subscribe(types.ScopeInputAck, 1)
+	muxSnapshotChannel := mux.Subscribe(types.ScopeSnapshot, 1)
+	go mux.Run()
 
 	serverAddr, err := net.ResolveUDPAddr("udp", ":3000")
 	if err != nil {
 		return nil, err
 	}
 
-	err = conn.Send(serverAddr, &gameconn.Message{Scope: gameconn.ScopeHi})
+	err = ln.Greet(context.TODO(), serverAddr)
 	if err != nil {
 		return nil, fmt.Errorf("saying hi to server: %w", err)
 	}
@@ -42,41 +50,72 @@ func NewGame() (*Game, error) {
 	img.Fill(color.White)
 
 	g := &Game{
-		img:         img,
-		conn:        conn,
-		serverAddr:  serverAddr,
-		inputBuffer: &InputBuffer{},
+		img:                img,
+		ln:                 ln,
+		mux:                mux,
+		muxInputAckChannel: muxInputAckChannel,
+		muxSnapshotChannel: muxSnapshotChannel,
+		serverAddr:         serverAddr,
+		inputBuffer:        &InputBuffer{},
 	}
 
 	go g.inputBufferSender()
-	g.conn.Handle(types.ScopeInputAck, g.inputAckHandler)
-	g.conn.Handle(types.ScopeSnapshot, g.snapshotHandler)
+	go g.inputAckLoop()
+	go g.snapshotLoop()
 
 	return g, nil
 }
 
-func (g *Game) snapshotHandler(sender net.Addr, msg *gameconn.Message) {
+func (g *Game) snapshotLoop() {
+	for envel := range g.muxSnapshotChannel {
+		err := g.State.UnmarshalBinary(envel.Message.Body)
+		slog.Info("snapshot received", "snapshot", g.State)
+		if err != nil {
+			slog.Error("failed to unmarshal snapshot", "error", err)
+		}
+	}
+}
+
+/* func (g *Game) snapshotHandler(sender net.Addr, msg *gameconn.Message) {
 	err := g.State.UnmarshalBinary(msg.Body)
 	slog.Info("snapshot received", "snapshot", g.State)
 	if err != nil {
 		slog.Error("failed to unmarshal snapshot", "error", err)
 	}
-}
+} */
 
-func (g *Game) Close() error {
-	err := g.conn.Send(g.serverAddr, &gameconn.Message{Scope: gameconn.ScopeBye})
+func (g *Game) Close(ctx context.Context) error {
+	err := g.mux.Close()
 	if err != nil {
-		return fmt.Errorf("saying bye to server: %w", err)
+		return fmt.Errorf("close mux: %w", err)
 	}
-
-	err = g.conn.Close()
+	err = g.ln.Close(ctx)
 	if err != nil {
-		return fmt.Errorf("closing udp %s: %w", g.conn.LocalAddr(), err)
+		return fmt.Errorf("close ln: %w", err)
 	}
 	return nil
 }
 
-func (g *Game) inputAckHandler(sender net.Addr, msg *gameconn.Message) {
+func (g *Game) inputAckLoop() {
+	for envel := range g.muxInputAckChannel {
+		var index uint32
+		_, err := binary.Decode(envel.Message.Body, binary.BigEndian, &index)
+		if err != nil {
+			slog.Error("failed to decode ack input index", "error", err)
+		}
+
+		err = g.inputBuffer.FlushUntil(index)
+		if err != nil {
+			slog.Error("failed to flush input buffer",
+				"until_index", index, "error", err)
+			return
+		}
+
+		slog.Info("flushed input buffer", "until_index", index)
+	}
+}
+
+/* func (g *Game) inputAckHandler(sender net.Addr, msg *gameconn.Message) {
 	var index uint32
 	_, err := binary.Decode(msg.Body, binary.BigEndian, &index)
 	if err != nil {
@@ -91,7 +130,7 @@ func (g *Game) inputAckHandler(sender net.Addr, msg *gameconn.Message) {
 	}
 
 	slog.Info("flushed input buffer", "until_index", index)
-}
+} */
 
 func (g *Game) inputBufferSender() {
 	ticker := time.NewTicker(time.Second / 60)
@@ -103,10 +142,8 @@ func (g *Game) inputBufferSender() {
 			continue
 		}
 
-		err = g.conn.Send(g.serverAddr, &gameconn.Message{
-			Scope: types.ScopeInput,
-			Body:  body,
-		})
+		msg := udp.NewMessageWithLabel(body, types.ScopeInput)
+		err = g.ln.TrySend(context.TODO(), g.serverAddr, msg)
 		if errors.Is(err, net.ErrClosed) {
 			slog.Info("connection closed", "server_address", g.serverAddr)
 			return
