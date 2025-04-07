@@ -8,6 +8,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 func init() {
@@ -125,16 +127,14 @@ func (ln *Listener) serverExists(addr string) bool {
 // TODO: add Listener.SendAll (sends to all clients w/ ack)
 
 func (ln *Listener) TrySendAll(ctx context.Context, msg Message) error {
-	var errs []error
+	g, ctx := errgroup.WithContext(ctx)
 	for addr := range ln.clients {
-		udpAddr := must(net.ResolveUDPAddr("udp", addr))
-		err := ln.TrySend(ctx, udpAddr, msg)
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
+		g.Go(func() error {
+			udpAddr := must(net.ResolveUDPAddr("udp", addr))
+			return ln.TrySend(ctx, udpAddr, msg)
+		})
 	}
-	return errors.Join(errs...)
+	return g.Wait()
 }
 
 func (ln *Listener) TrySend(ctx context.Context, dest net.Addr, msg Message) error {
