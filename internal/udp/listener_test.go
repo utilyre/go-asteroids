@@ -32,6 +32,50 @@ func makeListener(tb testing.TB) *udp.Listener {
 	return ln
 }
 
+func FuzzListener(f *testing.F) {
+	tests := [...][]byte{
+		nil,
+		{},
+		{1},
+		[]byte("Hello, world"),
+		[]byte("👋"),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	server := makeListener(f)
+	f.Logf("server bound to udp %q", server.LocalAddr())
+	client := makeListener(f)
+	f.Logf("client bound to udp %q", client.LocalAddr())
+
+	err := client.Greet(ctx, server.LocalAddr())
+	if err != nil {
+		f.Fatal(err)
+	}
+
+	for _, test := range tests {
+		f.Add(test)
+	}
+	f.Fuzz(func(t *testing.T, body []byte) {
+		sent := udp.NewMessage(body)
+		err := client.TrySend(ctx, server.LocalAddr(), sent)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		receivedEnvel := <-server.Inbox()
+		if addr := client.LocalAddr().String(); addr != receivedEnvel.Sender.String() {
+			t.Errorf("expected client %q; actual client %q",
+				addr, receivedEnvel.Sender)
+		}
+		if !sent.Equal(receivedEnvel.Message) {
+			t.Errorf("expected message %q; actual message %q",
+				sent, receivedEnvel.Message)
+		}
+	})
+}
+
 func TestListener(t *testing.T) {
 	t.Run("simple message passing one to one", func(t *testing.T) {
 		var mu sync.Mutex
