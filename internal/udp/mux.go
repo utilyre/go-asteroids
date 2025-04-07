@@ -6,7 +6,9 @@ import (
 )
 
 func NewMessageWithLabel(body []byte, label byte) Message {
-	newBody := append([]byte{label}, body...)
+	newBody := make([]byte, 1, 1+len(body))
+	newBody[0] = label
+	newBody = append(newBody, body...)
 	return NewMessage(newBody)
 }
 
