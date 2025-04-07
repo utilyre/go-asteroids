@@ -1,36 +1,37 @@
 package udp_test
 
 import (
-	"fmt"
 	"multiplayer/internal/udp"
 	"testing"
 )
 
-func TestMessage_MarshalBinary_UnmarshalBinary(t *testing.T) {
-	tests := []udp.Message{
-		udp.NewMessage(nil),
-		udp.NewMessage([]byte{}),
-		udp.NewMessage([]byte{1}),
-		udp.NewMessage([]byte("Hello, world")),
-		udp.NewMessage([]byte("👋")),
+func FuzzMessage_Binary(f *testing.F) {
+	tests := [...][]byte{
+		nil,
+		{},
+		{1},
+		[]byte("Hello, world"),
+		[]byte("👋"),
 	}
 
-	for i, test := range tests {
-		t.Run(fmt.Sprintf("test case %02d", i), func(t *testing.T) {
-			data, err := test.MarshalBinary()
-			if err != nil {
-				t.Fatal(t)
-			}
-
-			var msg udp.Message
-			err = msg.UnmarshalBinary(data)
-			if err != nil {
-				t.Fatal(t)
-			}
-
-			if !test.Equal(msg) {
-				t.Errorf("expected message %q; actual message %q", test, msg)
-			}
-		})
+	for _, test := range tests {
+		f.Add(test)
 	}
+	f.Fuzz(func(t *testing.T, body []byte) {
+		orig := udp.NewMessage(body)
+		data, err := orig.MarshalBinary()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var parsed udp.Message
+		err = parsed.UnmarshalBinary(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !orig.Equal(parsed) {
+			t.Errorf("expected message %q; actual message %q", orig, parsed)
+		}
+	})
 }
