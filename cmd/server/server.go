@@ -54,7 +54,7 @@ func (srv *GameServer) inputLoop() {
 	lastMessage := time.Now()
 
 	for envel := range srv.muxInputChannel {
-		slog.Info("received message from input channel",
+		slog.Debug("received message from input channel",
 			"sender", envel.Sender, "message", envel.Message)
 		inputs, err := parseInputMessageBody(envel.Message.Body)
 		if err != nil {
@@ -82,52 +82,13 @@ func (srv *GameServer) inputLoop() {
 				slog.Warn("failed to acknowledge last input",
 					"sender", envel.Sender, "error", err)
 			} else {
-				slog.Info("acknowledged last input", "index", lastInput.Index)
+				slog.Debug("acknowledged last input", "index", lastInput.Index)
 			}
 		}
 
 		srv.inputQueue.ProcessInputs(inputs)
 	}
 }
-
-/* func (srv *GameServer) inputHandler() gameconn.Handler {
-	const inputRate = 15
-
-	lastMessage := time.Now()
-	return func(sender net.Addr, msg *gameconn.Message) {
-		inputs, err := parseInputMessageBody(msg.Body)
-		if err != nil {
-			slog.Warn("failed to read input message",
-				"sender_address", sender, "error", err)
-			return
-		}
-
-		// drop messages that are received faster than inputRate
-		if dt := time.Since(lastMessage); dt < time.Second/inputRate {
-			return
-		}
-		lastMessage = time.Now()
-
-		if len(inputs) > 0 {
-			lastInput := inputs[len(inputs)-1]
-			body := make([]byte, 4)
-			_, _ = binary.Encode(body, binary.BigEndian, lastInput.Index)
-
-			err = srv.conn.Send(sender, &gameconn.Message{
-				Scope: types.ScopeInputAck,
-				Body:  body,
-			})
-			if err != nil {
-				slog.Warn("failed to acknowledge last input",
-					"sender_address", sender, "error", err)
-				return
-			}
-			slog.Info("acknowledged last input", "index", lastInput.Index)
-		}
-
-		srv.inputQueue.ProcessInputs(inputs)
-	}
-} */
 
 var ErrCorruptedMessage = errors.New("message corrupted")
 
@@ -137,10 +98,7 @@ func parseInputMessageBody(body []byte) ([]types.Input, error) {
 	}
 
 	var size uint16
-	_, err := binary.Decode(body, binary.BigEndian, &size)
-	if err != nil {
-		panic("message should have been large enough")
-	}
+	must(binary.Decode(body, binary.BigEndian, &size))
 	if expected := 2 + int(size)*types.InputSize; expected > len(body) {
 		return nil, fmt.Errorf(
 			"expected body size > %d; actual body size = %d: %w",
@@ -152,7 +110,7 @@ func parseInputMessageBody(body []byte) ([]types.Input, error) {
 
 	inputs := make([]types.Input, size)
 	for i := range len(inputs) {
-		err = inputs[i].UnmarshalBinary(body[2+i*types.InputSize : 2+(i+1)*types.InputSize])
+		err := inputs[i].UnmarshalBinary(body[2+i*types.InputSize : 2+(i+1)*types.InputSize])
 		if err != nil {
 			return nil, fmt.Errorf("unmarshaling input #%d: %w", i, err)
 		}

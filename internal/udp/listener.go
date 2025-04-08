@@ -187,25 +187,20 @@ func (ln *Listener) readLoop() {
 		var msg Message
 		err := msg.UnmarshalBinary(buf[:n])
 		if err != nil {
-			slog.Debug("failed to unmarshal message", "error", err)
+			slog.Warn("failed to unmarshal message", "error", err)
 			continue
 		}
 
 		slog.Debug("message received from udp", "sender", addr, "message", msg)
 
 		if msg.flags&flagHi != 0 {
-			if _, exists := ln.clients[addr.String()]; !exists {
-				ln.clients[addr.String()] = struct{}{}
-				slog.Debug("somebody just connected", "address", addr)
-			} else {
-				slog.Debug("somebody tried to connect more than once",
-					"address", addr)
-			}
+			ln.clients[addr.String()] = struct{}{}
+			slog.Info("new client connected", "address", addr)
 			continue
 		}
 		if msg.flags&flagBye != 0 {
 			delete(ln.clients, addr.String())
-			slog.Debug("somebody just disconnected", "address", addr)
+			slog.Info("client disconnected", "address", addr)
 			continue
 		}
 

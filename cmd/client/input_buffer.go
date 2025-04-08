@@ -38,10 +38,7 @@ func (buf InputBuffer) MarshalBinary() ([]byte, error) {
 	finalSize := 2 + types.InputSize*len(buf.inputs)
 	data := make([]byte, 2, finalSize)
 
-	_, err := binary.Encode(data, binary.BigEndian, uint16(len(buf.inputs)))
-	if err != nil {
-		panic("data should have been large enough")
-	}
+	must(binary.Encode(data, binary.BigEndian, uint16(len(buf.inputs))))
 
 	for _, input := range buf.inputs {
 		inputData, err := input.MarshalBinary()
