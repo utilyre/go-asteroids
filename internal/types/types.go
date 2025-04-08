@@ -22,14 +22,8 @@ type State struct {
 
 func (s *State) MarshalBinary() ([]byte, error) {
 	data := make([]byte, StateSize)
-	_, err := binary.Encode(data, binary.BigEndian, s.Position.X)
-	if err != nil {
-		panic("data should have been large enough")
-	}
-	_, err = binary.Encode(data[64:], binary.BigEndian, s.Position.Y)
-	if err != nil {
-		panic("data should have been large enough")
-	}
+	must(binary.Encode(data, binary.BigEndian, s.Position.X))
+	must(binary.Encode(data[64:], binary.BigEndian, s.Position.Y))
 	return data, nil
 }
 
@@ -38,15 +32,8 @@ func (s *State) UnmarshalBinary(data []byte) error {
 		return fmt.Errorf("data with len %d: %w", l, ErrTooSmall)
 	}
 
-	_, err := binary.Decode(data, binary.BigEndian, &s.Position.X)
-	if err != nil {
-		panic("data should have been large enough")
-	}
-	_, err = binary.Decode(data[64:], binary.BigEndian, &s.Position.Y)
-	if err != nil {
-		panic("data should have been large enough")
-	}
-
+	must(binary.Decode(data, binary.BigEndian, &s.Position.X))
+	must(binary.Decode(data[64:], binary.BigEndian, &s.Position.Y))
 	return nil
 }
 
@@ -59,10 +46,7 @@ type Input struct { // ~5B
 
 func (i Input) MarshalBinary() ([]byte, error) {
 	data := make([]byte, InputSize)
-	_, err := binary.Encode(data, binary.BigEndian, i.Index)
-	if err != nil {
-		panic("data should have been large enough")
-	}
+	must(binary.Encode(data, binary.BigEndian, i.Index))
 
 	if i.Up {
 		data[4] |= 1 << 0
@@ -87,10 +71,7 @@ func (i *Input) UnmarshalBinary(data []byte) error {
 		return fmt.Errorf("data with len %d: %w", l, ErrTooSmall)
 	}
 
-	_, err := binary.Decode(data, binary.BigEndian, &i.Index)
-	if err != nil {
-		panic("data should have been large enough")
-	}
+	must(binary.Decode(data, binary.BigEndian, &i.Index))
 
 	i.Up = data[4]&(1<<0) != 0
 	i.Left = data[4]&(1<<1) != 0

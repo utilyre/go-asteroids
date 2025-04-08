@@ -137,10 +137,7 @@ func parseInputMessageBody(body []byte) ([]types.Input, error) {
 	}
 
 	var size uint16
-	_, err := binary.Decode(body, binary.BigEndian, &size)
-	if err != nil {
-		panic("message should have been large enough")
-	}
+	must(binary.Decode(body, binary.BigEndian, &size))
 	if expected := 2 + int(size)*types.InputSize; expected > len(body) {
 		return nil, fmt.Errorf(
 			"expected body size > %d; actual body size = %d: %w",
@@ -152,7 +149,7 @@ func parseInputMessageBody(body []byte) ([]types.Input, error) {
 
 	inputs := make([]types.Input, size)
 	for i := range len(inputs) {
-		err = inputs[i].UnmarshalBinary(body[2+i*types.InputSize : 2+(i+1)*types.InputSize])
+		err := inputs[i].UnmarshalBinary(body[2+i*types.InputSize : 2+(i+1)*types.InputSize])
 		if err != nil {
 			return nil, fmt.Errorf("unmarshaling input #%d: %w", i, err)
 		}
