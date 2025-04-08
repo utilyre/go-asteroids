@@ -54,16 +54,18 @@ func (srv *GameServer) inputLoop() {
 	lastMessage := time.Now()
 
 	for envel := range srv.muxInputChannel {
+		slog.Info("received message from input channel",
+			"sender", envel.Sender, "message", envel.Message)
 		inputs, err := parseInputMessageBody(envel.Message.Body)
 		if err != nil {
 			slog.Warn("failed to read input message",
 				"sender", envel.Sender, "error", err)
-			return
+			continue
 		}
 
 		// drop messages that are received faster than inputRate
 		if dt := time.Since(lastMessage); dt < time.Second/inputRate {
-			return
+			continue
 		}
 		lastMessage = time.Now()
 
@@ -74,13 +76,14 @@ func (srv *GameServer) inputLoop() {
 
 			msg := udp.NewMessageWithLabel(body, types.ScopeInputAck)
 
+			slog.Debug("sending input ack message", "index", lastInput.Index)
 			err = srv.ln.TrySend(context.TODO(), envel.Sender, msg)
 			if err != nil {
 				slog.Warn("failed to acknowledge last input",
 					"sender", envel.Sender, "error", err)
-				return
+			} else {
+				slog.Info("acknowledged last input", "index", lastInput.Index)
 			}
-			slog.Info("acknowledged last input", "index", lastInput.Index)
 		}
 
 		srv.inputQueue.ProcessInputs(inputs)
@@ -130,7 +133,7 @@ var ErrCorruptedMessage = errors.New("message corrupted")
 
 func parseInputMessageBody(body []byte) ([]types.Input, error) {
 	if len(body) < 2 {
-		return nil, ErrCorruptedMessage
+		return nil, fmt.Errorf("short body: %w", ErrCorruptedMessage)
 	}
 
 	var size uint16
@@ -138,8 +141,13 @@ func parseInputMessageBody(body []byte) ([]types.Input, error) {
 	if err != nil {
 		panic("message should have been large enough")
 	}
-	if 2+int(size)*types.InputSize > len(body) {
-		return nil, ErrCorruptedMessage
+	if expected := 2 + int(size)*types.InputSize; expected > len(body) {
+		return nil, fmt.Errorf(
+			"expected body size > %d; actual body size = %d: %w",
+			expected,
+			len(body),
+			ErrCorruptedMessage,
+		)
 	}
 
 	inputs := make([]types.Input, size)

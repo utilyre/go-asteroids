@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	_ "multiplayer/internal/config"
 	"multiplayer/internal/types"
 	"multiplayer/internal/udp"
 )

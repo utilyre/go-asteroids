@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log/slog"
 	"multiplayer/internal/types"
 	"sync/atomic"
 )
@@ -25,7 +26,9 @@ func (q *InputQueue) ProcessInputs(inputs []types.Input) {
 			continue
 		}
 
+		slog.Debug("waiting to enqueue an input", "index", input.Index)
 		q.ch <- input
+		slog.Debug("input enqueued", "index", input.Index)
 		q.lastIndex.Store(input.Index)
 	}
 }

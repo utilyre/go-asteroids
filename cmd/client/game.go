@@ -98,6 +98,9 @@ func (g *Game) Close(ctx context.Context) error {
 
 func (g *Game) inputAckLoop() {
 	for envel := range g.muxInputAckChannel {
+		slog.Debug("received message from input ack channel",
+			"sender", envel.Sender, "message", envel.Message)
+
 		var index uint32
 		_, err := binary.Decode(envel.Message.Body, binary.BigEndian, &index)
 		if err != nil {
@@ -136,6 +139,7 @@ func (g *Game) inputBufferSender() {
 	ticker := time.NewTicker(time.Second / 60)
 	defer ticker.Stop()
 	for ; ; <-ticker.C {
+		// slog.Info("happening", "size", len(g.inputBuffer.inputs))
 		body, err := g.inputBuffer.MarshalBinary()
 		if err != nil {
 			slog.Error("failed to marshal input buffer", "error", err)

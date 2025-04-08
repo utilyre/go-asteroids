@@ -12,10 +12,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func init() {
-	// slog.SetLogLoggerLevel(slog.LevelDebug)
-}
-
 type Envelope struct {
 	Sender  net.Addr
 	Message Message
@@ -84,7 +80,6 @@ func (ln *Listener) Greet(ctx context.Context, dest net.Addr) error {
 	if ln.serverExists(dest.String()) {
 		return ErrAlreadyGreeted
 	}
-	slog.Debug("greet: read from servers")
 
 	msg := newMessage(nil, flagHi)
 	err := ln.TrySend(ctx, dest, msg) // TODO: make sure it's been received (requires ack)
@@ -94,7 +89,6 @@ func (ln *Listener) Greet(ctx context.Context, dest net.Addr) error {
 	ln.serversLock.Lock()
 	ln.servers[dest.String()] = struct{}{}
 	ln.serversLock.Unlock()
-	slog.Debug("greet: wrote to servers")
 	return nil
 }
 
@@ -102,7 +96,6 @@ func (ln *Listener) Farewell(ctx context.Context, dest net.Addr) error {
 	if !ln.serverExists(dest.String()) {
 		return ErrServerNotFound
 	}
-	slog.Debug("farewell: read from servers")
 
 	msg := newMessage(nil, flagBye)
 	err := ln.TrySend(ctx, dest, msg)
@@ -112,7 +105,6 @@ func (ln *Listener) Farewell(ctx context.Context, dest net.Addr) error {
 	ln.serversLock.Lock()
 	delete(ln.servers, dest.String())
 	ln.serversLock.Unlock()
-	slog.Debug("farewell: wrote to servers")
 	return nil
 }
 
@@ -172,9 +164,7 @@ func (ln *Listener) TrySend(ctx context.Context, dest net.Addr, msg Message) err
 		return fmt.Errorf("resetting write deadline: %w", err)
 	}
 
-	slog.Debug("here: waiting on done")
 	done <- struct{}{} // close(done) does not wait until the goroutine catches up
-	slog.Debug("here: done sent*")
 	if goroutineErr != nil {
 		return fmt.Errorf("setting write deadline: %w", err)
 	}
@@ -201,7 +191,7 @@ func (ln *Listener) readLoop() {
 			continue
 		}
 
-		slog.Debug("got message", "sender", addr, "msg", msg)
+		slog.Debug("message received from udp", "sender", addr, "message", msg)
 
 		if msg.flags&flagHi != 0 {
 			if _, exists := ln.clients[addr.String()]; !exists {

@@ -45,6 +45,8 @@ func (mux *Mux) Subscribe(label byte, queueSize int) <-chan Envelope {
 
 func (mux *Mux) Run() {
 	mux.running.Store(true)
+	defer mux.running.Store(false)
+
 	for envel := range mux.ln.Inbox() {
 		if len(envel.Message.Body) < 1 {
 			slog.Warn("message too short to have a label",
@@ -53,6 +55,8 @@ func (mux *Mux) Run() {
 		}
 
 		label := envel.Message.Body[0]
+		envel.Message.Body = envel.Message.Body[1:] // omit the label
+
 		ch, exists := mux.channels[label]
 		if !exists {
 			slog.Warn(
@@ -64,7 +68,9 @@ func (mux *Mux) Run() {
 			continue
 		}
 
+		slog.Debug("waiting on sending envelope to channel",
+			"sender", envel.Sender, "label", label, "message", envel.Message)
 		ch <- envel
+		slog.Debug("envelope sent to corresponding channel")
 	}
-	mux.running.Store(false)
 }
