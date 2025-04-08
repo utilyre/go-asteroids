@@ -90,45 +90,6 @@ func (srv *GameServer) inputLoop() {
 	}
 }
 
-/* func (srv *GameServer) inputHandler() gameconn.Handler {
-	const inputRate = 15
-
-	lastMessage := time.Now()
-	return func(sender net.Addr, msg *gameconn.Message) {
-		inputs, err := parseInputMessageBody(msg.Body)
-		if err != nil {
-			slog.Warn("failed to read input message",
-				"sender_address", sender, "error", err)
-			return
-		}
-
-		// drop messages that are received faster than inputRate
-		if dt := time.Since(lastMessage); dt < time.Second/inputRate {
-			return
-		}
-		lastMessage = time.Now()
-
-		if len(inputs) > 0 {
-			lastInput := inputs[len(inputs)-1]
-			body := make([]byte, 4)
-			_, _ = binary.Encode(body, binary.BigEndian, lastInput.Index)
-
-			err = srv.conn.Send(sender, &gameconn.Message{
-				Scope: types.ScopeInputAck,
-				Body:  body,
-			})
-			if err != nil {
-				slog.Warn("failed to acknowledge last input",
-					"sender_address", sender, "error", err)
-				return
-			}
-			slog.Info("acknowledged last input", "index", lastInput.Index)
-		}
-
-		srv.inputQueue.ProcessInputs(inputs)
-	}
-} */
-
 var ErrCorruptedMessage = errors.New("message corrupted")
 
 func parseInputMessageBody(body []byte) ([]types.Input, error) {

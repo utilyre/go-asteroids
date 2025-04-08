@@ -77,14 +77,6 @@ func (g *Game) snapshotLoop() {
 	}
 }
 
-/* func (g *Game) snapshotHandler(sender net.Addr, msg *gameconn.Message) {
-	err := g.State.UnmarshalBinary(msg.Body)
-	slog.Info("snapshot received", "snapshot", g.State)
-	if err != nil {
-		slog.Error("failed to unmarshal snapshot", "error", err)
-	}
-} */
-
 func (g *Game) Close(ctx context.Context) error {
 	err := g.mux.Close()
 	if err != nil {
@@ -118,23 +110,6 @@ func (g *Game) inputAckLoop() {
 		slog.Debug("flushed input buffer", "until_index", index)
 	}
 }
-
-/* func (g *Game) inputAckHandler(sender net.Addr, msg *gameconn.Message) {
-	var index uint32
-	_, err := binary.Decode(msg.Body, binary.BigEndian, &index)
-	if err != nil {
-		slog.Error("failed to decode ack input index", "error", err)
-	}
-
-	err = g.inputBuffer.FlushUntil(index)
-	if err != nil {
-		slog.Error("failed to flush input buffer",
-			"until_index", index, "error", err)
-		return
-	}
-
-	slog.Info("flushed input buffer", "until_index", index)
-} */
 
 func (g *Game) inputBufferSender() {
 	ticker := time.NewTicker(time.Second / 60)
