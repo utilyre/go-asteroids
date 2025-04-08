@@ -152,6 +152,10 @@ func (g *Game) inputBufferSender() {
 			slog.Info("connection closed", "server_address", g.serverAddr)
 			return
 		}
+		if err != nil {
+			slog.Warn("failed to send inputs", "error", err)
+			continue
+		}
 	}
 }
 
