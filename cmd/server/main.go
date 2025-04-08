@@ -25,14 +25,14 @@ func main() {
 		for snapshot := range simulation.SnapshotQueue() {
 			data, err := snapshot.MarshalBinary()
 			if err != nil {
-				slog.Error("failed to marshal snapshot", "error", err)
+				slog.Warn("failed to marshal snapshot", "error", err)
 				continue
 			}
 
 			msg := udp.NewMessageWithLabel(data, types.ScopeSnapshot)
 			err = srv.ln.TrySendAll(context.TODO(), msg)
 			if err != nil {
-				slog.Error("failed to send snapshot", "error", err)
+				slog.Warn("failed to send snapshot", "error", err)
 				continue
 			}
 		}

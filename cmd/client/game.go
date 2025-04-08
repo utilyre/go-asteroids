@@ -69,10 +69,11 @@ func NewGame() (*Game, error) {
 func (g *Game) snapshotLoop() {
 	for envel := range g.muxSnapshotChannel {
 		err := g.State.UnmarshalBinary(envel.Message.Body)
-		slog.Info("snapshot received", "snapshot", g.State)
 		if err != nil {
-			slog.Error("failed to unmarshal snapshot", "error", err)
+			slog.Warn("failed to unmarshal snapshot", "error", err)
+			continue
 		}
+		slog.Debug("snapshot received", "snapshot", g.State)
 	}
 }
 
@@ -104,17 +105,17 @@ func (g *Game) inputAckLoop() {
 		var index uint32
 		_, err := binary.Decode(envel.Message.Body, binary.BigEndian, &index)
 		if err != nil {
-			slog.Error("failed to decode ack input index", "error", err)
+			slog.Warn("failed to decode ack input index", "error", err)
 		}
 
 		err = g.inputBuffer.FlushUntil(index)
 		if err != nil {
-			slog.Error("failed to flush input buffer",
+			slog.Warn("failed to flush input buffer",
 				"until_index", index, "error", err)
 			return
 		}
 
-		slog.Info("flushed input buffer", "until_index", index)
+		slog.Debug("flushed input buffer", "until_index", index)
 	}
 }
 
@@ -139,10 +140,9 @@ func (g *Game) inputBufferSender() {
 	ticker := time.NewTicker(time.Second / 60)
 	defer ticker.Stop()
 	for ; ; <-ticker.C {
-		// slog.Info("happening", "size", len(g.inputBuffer.inputs))
 		body, err := g.inputBuffer.MarshalBinary()
 		if err != nil {
-			slog.Error("failed to marshal input buffer", "error", err)
+			slog.Warn("failed to marshal input buffer", "error", err)
 			continue
 		}
 
