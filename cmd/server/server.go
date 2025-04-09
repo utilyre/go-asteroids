@@ -72,7 +72,7 @@ func (srv *GameServer) inputLoop() {
 		if len(inputs) > 0 {
 			lastInput := inputs[len(inputs)-1]
 			body := make([]byte, 4)
-			_, _ = binary.Encode(body, binary.BigEndian, lastInput.Index)
+			must(binary.Encode(body, binary.BigEndian, lastInput.Index))
 
 			msg := udp.NewMessageWithLabel(body, types.ScopeInputAck)
 
