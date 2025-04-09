@@ -23,6 +23,7 @@ func NewGameServer(addr string, inputQueue *InputQueue) (*GameServer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("binding to udp %s: %w", addr, err)
 	}
+	slog.Info("bound to udp", "address", ln.LocalAddr())
 	mux := udp.NewMux(ln)
 	muxInputChannel := mux.Subscribe(types.ScopeInput, 1)
 	go mux.Run()

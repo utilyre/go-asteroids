@@ -31,6 +31,7 @@ func NewGame() (*Game, error) {
 	if err != nil {
 		return nil, err
 	}
+	slog.Info("bound to udp", "address", ln.LocalAddr())
 	mux := udp.NewMux(ln)
 	muxInputAckChannel := mux.Subscribe(types.ScopeInputAck, 1)
 	muxSnapshotChannel := mux.Subscribe(types.ScopeSnapshot, 1)
