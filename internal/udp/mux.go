@@ -68,9 +68,6 @@ func (mux *Mux) Run() {
 			continue
 		}
 
-		slog.Debug("waiting on sending envelope to channel",
-			"sender", envel.Sender, "label", label, "message", envel.Message)
 		ch <- envel
-		slog.Debug("envelope sent to corresponding channel")
 	}
 }

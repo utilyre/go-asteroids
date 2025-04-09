@@ -191,8 +191,6 @@ func (ln *Listener) readLoop() {
 			continue
 		}
 
-		slog.Debug("message received from udp", "sender", addr, "message", msg)
-
 		if msg.flags&flagHi != 0 {
 			ln.clients[addr.String()] = struct{}{}
 			slog.Info("new client connected", "address", addr)

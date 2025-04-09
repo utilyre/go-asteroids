@@ -55,8 +55,6 @@ func (srv *GameServer) inputLoop() {
 	lastMessage := time.Now()
 
 	for envel := range srv.muxInputChannel {
-		slog.Debug("received message from input channel",
-			"sender", envel.Sender, "message", envel.Message)
 		inputs, err := parseInputMessageBody(envel.Message.Body)
 		if err != nil {
 			slog.Warn("failed to read input message",
@@ -77,13 +75,11 @@ func (srv *GameServer) inputLoop() {
 
 			msg := udp.NewMessageWithLabel(body, types.ScopeInputAck)
 
-			slog.Debug("sending input ack message", "index", lastInput.Index)
 			err = srv.ln.TrySend(context.TODO(), envel.Sender, msg)
 			if err != nil {
 				slog.Warn("failed to acknowledge last input",
 					"sender", envel.Sender, "error", err)
 			} else {
-				slog.Debug("acknowledged last input", "index", lastInput.Index)
 			}
 		}
 

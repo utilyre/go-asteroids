@@ -31,7 +31,6 @@ func (g *Simulation) Run() {
 		}
 
 		g.Update(input)
-		slog.Debug("game state changed", "x", g.Position.X, "y", g.Position.Y)
 
 		g.snapshotQueue <- g.State
 	}

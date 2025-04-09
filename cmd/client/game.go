@@ -74,7 +74,6 @@ func (g *Game) snapshotLoop() {
 			slog.Warn("failed to unmarshal snapshot", "error", err)
 			continue
 		}
-		slog.Debug("snapshot received", "snapshot", g.State)
 	}
 }
 
@@ -92,9 +91,6 @@ func (g *Game) Close(ctx context.Context) error {
 
 func (g *Game) inputAckLoop() {
 	for envel := range g.muxInputAckChannel {
-		slog.Debug("received message from input ack channel",
-			"sender", envel.Sender, "message", envel.Message)
-
 		var index uint32
 		_, err := binary.Decode(envel.Message.Body, binary.BigEndian, &index)
 		if err != nil {
@@ -108,7 +104,6 @@ func (g *Game) inputAckLoop() {
 			return
 		}
 
-		slog.Debug("flushed input buffer", "until_index", index)
 	}
 }
 
