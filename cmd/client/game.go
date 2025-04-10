@@ -17,13 +17,11 @@ import (
 
 type Game struct {
 	types.State
-	img                *ebiten.Image
-	ln                 *udp.Listener
-	mux                *udp.Mux
-	muxInputAckChannel <-chan udp.Envelope
-	muxSnapshotChannel <-chan udp.Envelope
-	serverAddr         net.Addr
-	inputBuffer        *InputBuffer
+	img         *ebiten.Image
+	ln          *udp.Listener
+	mux         *udp.Mux
+	serverAddr  net.Addr
+	inputBuffer *InputBuffer
 }
 
 func NewGame() (*Game, error) {
@@ -33,8 +31,8 @@ func NewGame() (*Game, error) {
 	}
 	slog.Info("bound to udp", "address", ln.LocalAddr())
 	mux := udp.NewMux(ln)
-	muxInputAckChannel := mux.Subscribe(types.ScopeInputAck, 1)
-	muxSnapshotChannel := mux.Subscribe(types.ScopeSnapshot, 1)
+	inputAckTopic := mux.Subscribe(types.ScopeInputAck, 1)
+	snapshotTopic := mux.Subscribe(types.ScopeSnapshot, 1)
 	go mux.Run()
 
 	serverAddr, err := net.ResolveUDPAddr("udp", ":3000")
@@ -51,24 +49,22 @@ func NewGame() (*Game, error) {
 	img.Fill(color.White)
 
 	g := &Game{
-		img:                img,
-		ln:                 ln,
-		mux:                mux,
-		muxInputAckChannel: muxInputAckChannel,
-		muxSnapshotChannel: muxSnapshotChannel,
-		serverAddr:         serverAddr,
-		inputBuffer:        &InputBuffer{},
+		img:         img,
+		ln:          ln,
+		mux:         mux,
+		serverAddr:  serverAddr,
+		inputBuffer: &InputBuffer{},
 	}
 
 	go g.inputBufferSender()
-	go g.inputAckLoop()
-	go g.snapshotLoop()
+	go g.inputAckLoop(inputAckTopic)
+	go g.snapshotLoop(snapshotTopic)
 
 	return g, nil
 }
 
-func (g *Game) snapshotLoop() {
-	for envel := range g.muxSnapshotChannel {
+func (g *Game) snapshotLoop(snapshotTopic <-chan udp.Envelope) {
+	for envel := range snapshotTopic {
 		err := g.State.UnmarshalBinary(envel.Message.Body)
 		if err != nil {
 			slog.Warn("failed to unmarshal snapshot", "error", err)
@@ -89,8 +85,8 @@ func (g *Game) Close(ctx context.Context) error {
 	return nil
 }
 
-func (g *Game) inputAckLoop() {
-	for envel := range g.muxInputAckChannel {
+func (g *Game) inputAckLoop(inputAckTopic <-chan udp.Envelope) {
+	for envel := range inputAckTopic {
 		var index uint32
 		_, err := binary.Decode(envel.Message.Body, binary.BigEndian, &index)
 		if err != nil {

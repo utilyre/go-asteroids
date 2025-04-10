@@ -13,21 +13,21 @@ func NewMessageWithLabel(body []byte, label byte) Message {
 }
 
 type Mux struct {
-	ln       *Listener
-	channels map[byte]chan Envelope // maps a label to its channel
-	running  atomic.Bool
+	ln      *Listener
+	topics  map[byte]chan Envelope // maps labels to topics
+	running atomic.Bool
 }
 
 func NewMux(ln *Listener) *Mux {
 	return &Mux{
-		ln:       ln,
-		channels: map[byte]chan Envelope{},
+		ln:     ln,
+		topics: map[byte]chan Envelope{},
 	}
 }
 
 // NOTE: does not close mux.ln
 func (mux *Mux) Close() error {
-	for _, ch := range mux.channels {
+	for _, ch := range mux.topics {
 		close(ch)
 	}
 	return nil
@@ -38,9 +38,9 @@ func (mux *Mux) Subscribe(label byte, queueSize int) <-chan Envelope {
 		panic("mux error: cannot subscribe to labels while running")
 	}
 
-	ch := make(chan Envelope, queueSize)
-	mux.channels[label] = ch
-	return ch
+	topic := make(chan Envelope, queueSize)
+	mux.topics[label] = topic
+	return topic
 }
 
 func (mux *Mux) Run() {
@@ -57,10 +57,10 @@ func (mux *Mux) Run() {
 		label := envel.Message.Body[0]
 		envel.Message.Body = envel.Message.Body[1:] // omit the label
 
-		ch, exists := mux.channels[label]
+		topic, exists := mux.topics[label]
 		if !exists {
 			slog.Warn(
-				"failed to find a subscriber for the label, dropping the message",
+				"dropping udp message as there are no topics for its label",
 				"sender", envel.Sender,
 				"message", envel.Message,
 				"label", label,
@@ -68,7 +68,7 @@ func (mux *Mux) Run() {
 			continue
 		}
 
-		ch <- envel
+		topic <- envel
 		slog.Debug("sent envelope to label", "client", envel.Sender, "label", label)
 	}
 }

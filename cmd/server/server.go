@@ -12,10 +12,9 @@ import (
 )
 
 type GameServer struct {
-	ln              *udp.Listener
-	mux             *udp.Mux
-	muxInputChannel <-chan udp.Envelope
-	inputQueue      *InputQueue
+	ln         *udp.Listener
+	mux        *udp.Mux
+	inputQueue *InputQueue
 }
 
 func NewGameServer(addr string, inputQueue *InputQueue) (*GameServer, error) {
@@ -25,16 +24,15 @@ func NewGameServer(addr string, inputQueue *InputQueue) (*GameServer, error) {
 	}
 	slog.Info("bound to udp", "address", ln.LocalAddr())
 	mux := udp.NewMux(ln)
-	muxInputChannel := mux.Subscribe(types.ScopeInput, 1)
+	inputTopic := mux.Subscribe(types.ScopeInput, 1)
 	go mux.Run()
 
 	srv := &GameServer{
-		ln:              ln,
-		mux:             mux,
-		muxInputChannel: muxInputChannel,
-		inputQueue:      inputQueue,
+		ln:         ln,
+		mux:        mux,
+		inputQueue: inputQueue,
 	}
-	go srv.inputLoop()
+	go srv.inputLoop(inputTopic)
 	return srv, nil
 }
 
@@ -50,11 +48,11 @@ func (srv *GameServer) Close(ctx context.Context) error {
 	return nil
 }
 
-func (srv *GameServer) inputLoop() {
+func (srv *GameServer) inputLoop(inputTopic <-chan udp.Envelope) {
 	const inputRate = 15
 	lastMessage := time.Now()
 
-	for envel := range srv.muxInputChannel {
+	for envel := range inputTopic {
 		inputs, err := parseInputMessageBody(envel.Message.Body)
 		if err != nil {
 			slog.Warn("failed to read input message",
