@@ -1,5 +1,13 @@
 # Multiplayer
 
+```
+             _____________________________________________________
+            /                       snapshot                      \
+udp.Listener -> udp.Mux -> InputQueue -> Simulation -> SnapshotQueue
+           \_________/
+               ack
+```
+
 ## Development
 
 1. [Install ebitengine dependencies][ebitengine_install].

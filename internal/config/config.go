@@ -11,7 +11,7 @@ import (
 func init() {
 	logger := slog.New(tint.NewHandler(os.Stderr, &tint.Options{
 		Level:      slog.LevelDebug,
-		TimeFormat: time.TimeOnly,
+		TimeFormat: time.StampMilli,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			if err, ok := a.Value.Any().(error); ok {
 				aErr := tint.Err(err)
