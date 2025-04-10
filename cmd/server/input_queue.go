@@ -26,7 +26,9 @@ func (q *InputQueue) ProcessInputs(inputs []types.Input) {
 			continue
 		}
 
+		slog.Debug("wanna break from the ads?")
 		q.ch <- input
+		slog.Debug("enqueued input", "index", input.Index)
 		q.lastIndex.Store(input.Index)
 	}
 }

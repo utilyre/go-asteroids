@@ -79,11 +79,11 @@ func (srv *GameServer) inputLoop() {
 			if err != nil {
 				slog.Warn("failed to acknowledge last input",
 					"sender", envel.Sender, "error", err)
-			} else {
 			}
 		}
 
 		srv.inputQueue.ProcessInputs(inputs)
+		slog.Debug("processed inputs from input queue", "client", envel.Sender)
 	}
 }
 

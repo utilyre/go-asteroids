@@ -33,6 +33,7 @@ func (g *Simulation) Run() {
 		g.Update(input)
 
 		g.snapshotQueue <- g.State
+		slog.Debug("enqueued snapshot")
 	}
 }
 
