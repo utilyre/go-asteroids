@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"multiplayer/internal/types"
 	"multiplayer/internal/udp"
+	"sync/atomic"
 	"time"
 )
 
@@ -33,6 +34,15 @@ func NewGameServer(addr string, inputQueue *InputQueue) (*GameServer, error) {
 		inputQueue: inputQueue,
 	}
 	go srv.inputLoop(inputTopic)
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for ; ; <-ticker.C {
+			n := numAckedInput.Load()
+			slog.Debug("input ack rate", "rate", n)
+			numAckedInput.Store(0)
+		}
+	}()
 	return srv, nil
 }
 
@@ -47,6 +57,8 @@ func (srv *GameServer) Close(ctx context.Context) error {
 	}
 	return nil
 }
+
+var numAckedInput atomic.Uint32
 
 func (srv *GameServer) inputLoop(inputTopic <-chan udp.Envelope) {
 	const inputRate = 15
@@ -78,6 +90,7 @@ func (srv *GameServer) inputLoop(inputTopic <-chan udp.Envelope) {
 				slog.Warn("failed to acknowledge last input",
 					"sender", envel.Sender, "error", err)
 			}
+			numAckedInput.Add(1)
 		}
 
 		srv.inputQueue.ProcessInputs(envel.Sender, inputs)

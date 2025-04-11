@@ -4,8 +4,8 @@
              _____________________________________________________
             /                       snapshot                      \
 udp.Listener -> udp.Mux -> InputQueue -> Simulation -> SnapshotQueue
-           \_________/
-               ack
+           \____________/
+                 ack
 ```
 
 ## Development

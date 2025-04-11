@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -38,6 +39,15 @@ func Listen(addr string) (*Listener, error) {
 		servers: map[string]struct{}{},
 	}
 	go ln.readLoop()
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for ; ; <-ticker.C {
+			n := numHandled.Load()
+			slog.Debug("read rate", "rate", n)
+			numHandled.Store(0)
+		}
+	}()
 
 	return ln, nil
 }
@@ -174,6 +184,8 @@ func (ln *Listener) TrySend(ctx context.Context, dest net.Addr, msg Message) err
 
 const bufSize = 1024
 
+var numHandled atomic.Uint32
+
 func (ln *Listener) readLoop() {
 	buf := make([]byte, bufSize)
 	for {
@@ -206,6 +218,7 @@ func (ln *Listener) readLoop() {
 			Sender:  addr,
 			Message: msg,
 		}
+		numHandled.Add(1)
 
 		if readErr != nil {
 			slog.Warn("failed to read from udp", "error", err)

@@ -3,6 +3,7 @@ package main
 import (
 	"math"
 	"multiplayer/internal/types"
+	"time"
 )
 
 type Simulation struct {
