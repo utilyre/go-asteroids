@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log/slog"
 	"math"
 	"multiplayer/internal/types"
 )
@@ -33,7 +32,6 @@ func (g *Simulation) Run() {
 		g.Update(input)
 
 		g.snapshotQueue <- g.State
-		slog.Debug("enqueued snapshot")
 	}
 }
 

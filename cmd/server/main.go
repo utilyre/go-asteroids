@@ -35,7 +35,6 @@ func main() {
 				slog.Warn("failed to send snapshot", "error", err)
 				continue
 			}
-			slog.Debug("broadcasted snapshot")
 		}
 	}()
 

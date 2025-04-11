@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log/slog"
 	"multiplayer/internal/types"
 	"net"
 	"sync/atomic"
@@ -35,9 +34,7 @@ func (q *InputQueue) ProcessInputs(sender net.Addr, inputs []types.Input) {
 			continue
 		}
 
-		slog.Debug("wanna break from the ads?")
 		q.ch <- input
-		slog.Debug("enqueued input", "index", input.Index)
 		q.lastIndices[senderStr].Store(input.Index)
 	}
 }

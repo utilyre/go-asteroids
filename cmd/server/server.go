@@ -81,7 +81,6 @@ func (srv *GameServer) inputLoop(inputTopic <-chan udp.Envelope) {
 		}
 
 		srv.inputQueue.ProcessInputs(envel.Sender, inputs)
-		slog.Debug("processed inputs from input queue", "client", envel.Sender)
 	}
 }
 

@@ -69,6 +69,5 @@ func (mux *Mux) Run() {
 		}
 
 		topic <- envel
-		slog.Debug("sent envelope to label", "client", envel.Sender, "label", label)
 	}
 }

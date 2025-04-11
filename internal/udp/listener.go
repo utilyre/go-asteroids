@@ -206,7 +206,6 @@ func (ln *Listener) readLoop() {
 			Sender:  addr,
 			Message: msg,
 		}
-		slog.Debug("sent envelope to listener inbox", "client", addr)
 
 		if readErr != nil {
 			slog.Warn("failed to read from udp", "error", err)
