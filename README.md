@@ -18,13 +18,11 @@ udp.Listener -> udp.Mux -> InputQueue -> Simulation -> SnapshotQueue
    go run ./cmd/server
    ```
 
-2. Run the client:
+3. Run `n` clients (`n` > 1 is experimental):
 
    ```bash
-   go run ./cmd/client
+   ./spawn_clients.sh <n> # replace <n> with the desired number of clients
    ```
-
-3. Potentially run more clients (experimental, see [#2][#2]):
 
 [ebitengine_install]: https://ebitengine.org/en/documents/install
 [#2]: https://github.com/utilyre/multiplayer/pull/2
