@@ -63,6 +63,7 @@ func NewInputQueue() *InputQueue {
 }
 
 func (q *InputQueue) Close() {
+	close(q.cancelTimeoutc)
 	close(q.inputc)
 }
 
