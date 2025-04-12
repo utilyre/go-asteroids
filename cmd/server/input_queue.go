@@ -43,7 +43,7 @@ func NewInputQueue() *InputQueue {
 			statisticsMu.Lock()
 			maxInputLen = max(maxInputLen, len(q.inputc))
 			maxCancelLen = max(maxCancelLen, len(q.cancelTimeoutc))
-			statisticsMu.Lock()
+			statisticsMu.Unlock()
 		}
 	}()
 	go func() {
