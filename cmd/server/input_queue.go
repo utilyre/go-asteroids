@@ -34,6 +34,7 @@ func NewInputQueue() *InputQueue {
 		lastIndices:    map[string]*atomic.Uint32{},
 	}
 
+	// collect statistics
 	go func() {
 		ticker := time.NewTicker(time.Second / 60)
 		defer ticker.Stop()
@@ -80,8 +81,17 @@ func (q *InputQueue) ProcessInputs(sender net.Addr, inputs []types.Input) {
 		q.inputc <- input
 		q.lastIndices[senderStr].Store(input.Index)
 
+		// THEOREM: In queue Q, given elements A and B, if and only if A is
+		// closer to being dequeued than B, then A is older than B.
+		//
+		// Meaning, if an arbitrary element C is timed out, then all elements
+		// closer than C to being dequeued are also timed out. As a result, it
+		// is safe to dequeue from Q until C is reached.
+
+		// PERF: possible memory optimization using a worker pool
 		go func() {
 			select {
+			// TODO: done branch
 			case <-time.After(inputTimeout):
 				<-q.inputc
 			case <-q.cancelTimeoutc:
