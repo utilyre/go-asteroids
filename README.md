@@ -24,4 +24,11 @@ udp.Listener -> udp.Mux -> InputQueue -> Simulation -> SnapshotQueue
    go run ./cmd/client
    ```
 
+3. Potentially run more clients (experimental, see [#2][#2]):
+
 [ebitengine_install]: https://ebitengine.org/en/documents/install
+[#2]: https://github.com/utilyre/multiplayer/pull/2
+
+## Resources
+
+- [Networked Physics](https://gafferongames.com/categories/networked-physics)
