@@ -32,3 +32,4 @@ udp.Listener -> udp.Mux -> InputQueue -> Simulation -> SnapshotQueue
 ## Resources
 
 - [Networked Physics](https://gafferongames.com/categories/networked-physics)
+- [Network Programming with Go](https://www.amazon.com/Network-Programming-Go-Adam-Woodbeck/dp/1718500882)
