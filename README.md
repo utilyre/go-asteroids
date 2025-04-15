@@ -25,9 +25,9 @@ udp.Listener -> udp.Mux -> InputQueue -> Simulation -> SnapshotQueue
    ```
 
 [ebitengine_install]: https://ebitengine.org/en/documents/install
-[#2]: https://github.com/utilyre/multiplayer/pull/2
 
 ## Resources
 
 - [Networked Physics](https://gafferongames.com/categories/networked-physics)
 - [Sneaky Race Conditions and Granular Locks](https://blogtitle.github.io/sneaky-race-conditions-and-granular-locks)
+- [Network Programming with Go](https://www.amazon.com/Network-Programming-Go-Adam-Woodbeck/dp/1718500882)
