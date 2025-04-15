@@ -8,6 +8,28 @@ udp.Listener -> udp.Mux -> InputQueue -> Simulation -> SnapshotQueue
                  ack
 ```
 
+## Goal
+
+1. have multiple input queues for the simulation to consume
+
+```go
+for ; ; <-ticker.C {
+	for q := range g.inputqueues {
+		inputs := append(inputs, <-q)
+	}
+	input, open := g.inputQueue.Dequeue()
+	if !open {
+		break
+	}
+
+	for input := range inputs {
+		g.Update(input)
+	}
+
+	g.snapshotQueue <- g.State
+}
+```
+
 ## Development
 
 1. [Install ebitengine dependencies][ebitengine_install].
