@@ -3,6 +3,7 @@ package main
 import (
 	"math"
 	"multiplayer/internal/types"
+	"time"
 )
 
 type Simulation struct {
@@ -23,7 +24,11 @@ func (g *Simulation) Close() {
 }
 
 func (g *Simulation) Run() {
-	for {
+	const fps = 60
+	ticker := time.NewTicker(time.Second / fps)
+	defer ticker.Stop()
+
+	for ; ; <-ticker.C {
 		input, open := g.inputQueue.Dequeue()
 		if !open {
 			break

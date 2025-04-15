@@ -3,6 +3,7 @@ package udp
 import (
 	"log/slog"
 	"sync/atomic"
+	"time"
 )
 
 func NewMessageWithLabel(body []byte, label byte) Message {
@@ -19,6 +20,16 @@ type Mux struct {
 }
 
 func NewMux(ln *Listener) *Mux {
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for ; ; <-ticker.C {
+			n := muxRate.Load()
+			slog.Debug("mux rate", "rate", n)
+			muxRate.Store(0)
+		}
+	}()
+
 	return &Mux{
 		ln:     ln,
 		topics: map[byte]chan Envelope{},
@@ -42,6 +53,8 @@ func (mux *Mux) Subscribe(label byte, queueSize int) <-chan Envelope {
 	mux.topics[label] = topic
 	return topic
 }
+
+var muxRate atomic.Uint32
 
 func (mux *Mux) Run() {
 	mux.running.Store(true)
@@ -69,5 +82,6 @@ func (mux *Mux) Run() {
 		}
 
 		topic <- envel
+		muxRate.Add(1)
 	}
 }

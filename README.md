@@ -4,8 +4,8 @@
              _____________________________________________________
             /                       snapshot                      \
 udp.Listener -> udp.Mux -> InputQueue -> Simulation -> SnapshotQueue
-           \_________/
-               ack
+           \____________/
+                 ack
 ```
 
 ## Development
@@ -18,18 +18,16 @@ udp.Listener -> udp.Mux -> InputQueue -> Simulation -> SnapshotQueue
    go run ./cmd/server
    ```
 
-3. Run the client:
+3. Run `n` clients (`n` > 1 is experimental):
 
    ```bash
-   go run ./cmd/client
+   ./spawn_clients.sh <n> # replace <n> with the desired number of clients
    ```
 
-4. Potentially run more clients (experimental, see [#2][#2]):
-
 [ebitengine_install]: https://ebitengine.org/en/documents/install
-[#2]: https://github.com/utilyre/multiplayer/pull/2
 
 ## Resources
 
 - [Networked Physics](https://gafferongames.com/categories/networked-physics)
+- [Sneaky Race Conditions and Granular Locks](https://blogtitle.github.io/sneaky-race-conditions-and-granular-locks)
 - [Network Programming with Go](https://www.amazon.com/Network-Programming-Go-Adam-Woodbeck/dp/1718500882)

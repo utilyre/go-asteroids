@@ -10,6 +10,7 @@ import (
 	"multiplayer/internal/types"
 	"multiplayer/internal/udp"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -60,8 +61,19 @@ func NewGame() (*Game, error) {
 	go g.inputAckLoop(inputAckTopic)
 	go g.snapshotLoop(snapshotTopic)
 
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		for ; ; <-ticker.C {
+			n := numRecvSnapshot.Load()
+			slog.Debug("snapshot rate", "rate", n)
+			numRecvSnapshot.Store(0)
+		}
+	}()
+
 	return g, nil
 }
+
+var numRecvSnapshot atomic.Uint32
 
 func (g *Game) snapshotLoop(snapshotTopic <-chan udp.Envelope) {
 	for envel := range snapshotTopic {
@@ -70,6 +82,7 @@ func (g *Game) snapshotLoop(snapshotTopic <-chan udp.Envelope) {
 			slog.Warn("failed to unmarshal snapshot", "error", err)
 			continue
 		}
+		numRecvSnapshot.Add(1)
 	}
 }
 

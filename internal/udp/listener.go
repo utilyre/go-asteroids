@@ -7,9 +7,15 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
+)
+
+const (
+	listenerBufSize    = 100
+	numListenerReaders = 5
 )
 
 type Envelope struct {
@@ -20,6 +26,7 @@ type Envelope struct {
 type Listener struct {
 	conn        net.PacketConn
 	clients     map[string]struct{} // set of active client addrs
+	clientsLock sync.RWMutex
 	servers     map[string]struct{} // set of active server addrs
 	serversLock sync.RWMutex
 	msgc        chan Envelope
@@ -32,12 +39,25 @@ func Listen(addr string) (*Listener, error) {
 	}
 
 	ln := &Listener{
-		msgc:    make(chan Envelope, 1),
+		msgc:    make(chan Envelope, listenerBufSize),
 		conn:    conn,
 		clients: map[string]struct{}{},
 		servers: map[string]struct{}{},
 	}
-	go ln.readLoop()
+
+	for range numListenerReaders {
+		go ln.readLoop()
+	}
+
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for ; ; <-ticker.C {
+			n := numHandled.Load()
+			slog.Debug("read rate", "rate", n)
+			numHandled.Store(0)
+		}
+	}()
 
 	return ln, nil
 }
@@ -120,12 +140,16 @@ func (ln *Listener) serverExists(addr string) bool {
 
 func (ln *Listener) TrySendAll(ctx context.Context, msg Message) error {
 	g, ctx := errgroup.WithContext(ctx)
+	ln.clientsLock.RLock()
 	for addr := range ln.clients {
+		ln.clientsLock.RUnlock()
 		g.Go(func() error {
 			udpAddr := must(net.ResolveUDPAddr("udp", addr))
 			return ln.TrySend(ctx, udpAddr, msg)
 		})
+		ln.clientsLock.RLock()
 	}
+	ln.clientsLock.RUnlock()
 	return g.Wait()
 }
 
@@ -174,6 +198,8 @@ func (ln *Listener) TrySend(ctx context.Context, dest net.Addr, msg Message) err
 
 const bufSize = 1024
 
+var numHandled atomic.Uint32
+
 func (ln *Listener) readLoop() {
 	buf := make([]byte, bufSize)
 	for {
@@ -192,12 +218,15 @@ func (ln *Listener) readLoop() {
 		}
 
 		if msg.flags&flagHi != 0 {
+			ln.clientsLock.Lock()
 			ln.clients[addr.String()] = struct{}{}
+			ln.clientsLock.Unlock()
 			slog.Info("new client connected", "address", addr)
 			continue
-		}
-		if msg.flags&flagBye != 0 {
+		} else if msg.flags&flagBye != 0 {
+			ln.clientsLock.Lock()
 			delete(ln.clients, addr.String())
+			ln.clientsLock.Unlock()
 			slog.Info("client disconnected", "address", addr)
 			continue
 		}
@@ -206,6 +235,7 @@ func (ln *Listener) readLoop() {
 			Sender:  addr,
 			Message: msg,
 		}
+		numHandled.Add(1)
 
 		if readErr != nil {
 			slog.Warn("failed to read from udp", "error", err)

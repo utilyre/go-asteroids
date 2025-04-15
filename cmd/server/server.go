@@ -8,7 +8,13 @@ import (
 	"log/slog"
 	"multiplayer/internal/types"
 	"multiplayer/internal/udp"
+	"sync/atomic"
 	"time"
+)
+
+const (
+	inputTopicBufSize = 100
+	inputAckRate      = time.Second / 15
 )
 
 type GameServer struct {
@@ -24,7 +30,7 @@ func NewGameServer(addr string, inputQueue *InputQueue) (*GameServer, error) {
 	}
 	slog.Info("bound to udp", "address", ln.LocalAddr())
 	mux := udp.NewMux(ln)
-	inputTopic := mux.Subscribe(types.ScopeInput, 1)
+	inputTopic := mux.Subscribe(types.ScopeInput, inputTopicBufSize)
 	go mux.Run()
 
 	srv := &GameServer{
@@ -33,6 +39,15 @@ func NewGameServer(addr string, inputQueue *InputQueue) (*GameServer, error) {
 		inputQueue: inputQueue,
 	}
 	go srv.inputLoop(inputTopic)
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for ; ; <-ticker.C {
+			n := numAckedInput.Load()
+			slog.Debug("input ack rate", "rate", n)
+			numAckedInput.Store(0)
+		}
+	}()
 	return srv, nil
 }
 
@@ -48,9 +63,10 @@ func (srv *GameServer) Close(ctx context.Context) error {
 	return nil
 }
 
+var numAckedInput atomic.Uint32
+
 func (srv *GameServer) inputLoop(inputTopic <-chan udp.Envelope) {
-	const inputRate = 15
-	lastMessage := time.Now()
+	lastAck := time.Now()
 
 	for envel := range inputTopic {
 		inputs, err := parseInputMessageBody(envel.Message.Body)
@@ -60,13 +76,7 @@ func (srv *GameServer) inputLoop(inputTopic <-chan udp.Envelope) {
 			continue
 		}
 
-		// drop messages that are received faster than inputRate
-		if dt := time.Since(lastMessage); dt < time.Second/inputRate {
-			continue
-		}
-		lastMessage = time.Now()
-
-		if len(inputs) > 0 {
+		if len(inputs) > 0 && time.Since(lastAck) > inputAckRate {
 			lastInput := inputs[len(inputs)-1]
 			body := make([]byte, 4)
 			must(binary.Encode(body, binary.BigEndian, lastInput.Index))
@@ -78,6 +88,8 @@ func (srv *GameServer) inputLoop(inputTopic <-chan udp.Envelope) {
 				slog.Warn("failed to acknowledge last input",
 					"sender", envel.Sender, "error", err)
 			}
+			numAckedInput.Add(1)
+			lastAck = time.Now()
 		}
 
 		srv.inputQueue.ProcessInputs(envel.Sender, inputs)
