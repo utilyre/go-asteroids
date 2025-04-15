@@ -30,6 +30,10 @@ for ; ; <-ticker.C {
 }
 ```
 
+2. why do i even need to be notified when a new client connects??
+	 - to make a new queue?
+	 - can i make a single struct do all this?
+
 ## Development
 
 1. [Install ebitengine dependencies][ebitengine_install].
