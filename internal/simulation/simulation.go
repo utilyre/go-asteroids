@@ -35,16 +35,16 @@ func (sim *Simulation) Draw(screen *ebiten.Image) {
 }
 
 func (sim *Simulation) Update() error {
+	const (
+		dt         = 1.0 / 60
+		houseAccel = 80
+	)
+
 	select {
 	case <-sim.done:
 		return ebiten.Termination
 	default:
 	}
-
-	const (
-		dt         = 1.0 / 60
-		houseAccel = 80
-	)
 
 	var v state.Vec2
 	if ebiten.IsKeyPressed(ebiten.KeyH) {
