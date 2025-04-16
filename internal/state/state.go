@@ -1,6 +1,37 @@
 package state
 
-import "math"
+import (
+	"math"
+	"time"
+)
+
+type Input struct {
+	Left, Down, Up, Right bool
+}
+
+func (input Input) Manipulate(delta time.Duration, state State) State {
+	const houseAccel = 80
+	dt := delta.Seconds()
+
+	var v Vec2
+	if input.Left {
+		v.X -= 1
+	}
+	if input.Down {
+		v.Y += 1
+	}
+	if input.Up {
+		v.Y -= 1
+	}
+	if input.Right {
+		v.X += 1
+	}
+	state.House.Accel = v.Normalize().Mul(houseAccel)
+	state.House.Trans = state.House.Accel.Mul(0.5 * dt * dt).Add(state.House.Vel.Mul(dt)).Add(state.House.Trans)
+	state.House.Vel = state.House.Accel.Mul(dt).Add(state.House.Vel)
+
+	return state
+}
 
 type State struct {
 	House House

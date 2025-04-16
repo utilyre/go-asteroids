@@ -5,6 +5,7 @@ import (
 	"errors"
 	"image"
 	_ "image/png"
+	_ "multiplayer/internal/config"
 	"multiplayer/internal/simulation"
 	"os"
 	"os/signal"
@@ -19,6 +20,7 @@ func main() {
 
 	ebiten.SetWindowTitle("Multiplayer - Simulation")
 	ebiten.SetWindowSize(640, 480)
+	ebiten.SetWindowClosingHandled(true)
 
 	// listener
 
