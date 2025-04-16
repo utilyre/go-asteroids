@@ -5,7 +5,7 @@ import (
 	"errors"
 	"image"
 	_ "image/png"
-	"multiplayer/internal/state"
+	"multiplayer/internal/simulation"
 	"os"
 	"os/signal"
 	"syscall"
@@ -13,17 +13,12 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-const (
-	screenWidth  = 640
-	screenHeight = 480
-)
-
 func main() {
 	ctx, cancel := newSignalContext()
 	defer cancel()
 
 	ebiten.SetWindowTitle("Multiplayer - Simulation")
-	ebiten.SetWindowSize(screenWidth, screenHeight)
+	ebiten.SetWindowSize(640, 480)
 
 	// listener
 
@@ -33,10 +28,7 @@ func main() {
 	}
 
 	// simulation loop
-	sim := &Simulation{
-		done:     ctx.Done(),
-		houseImg: ebiten.NewImageFromImage(houseImg),
-	}
+	sim := simulation.New(ctx.Done(), houseImg)
 	err = ebiten.RunGame(sim)
 	if err != nil {
 		panic(err)
@@ -85,56 +77,4 @@ func openImage(name string) (img image.Image, err error) {
 	}
 
 	return img, nil
-}
-
-type Simulation struct {
-	done     <-chan struct{}
-	houseImg *ebiten.Image
-
-	state.State
-}
-
-func (sim *Simulation) Layout(int, int) (int, int) {
-	return screenWidth, screenHeight
-}
-
-func (sim *Simulation) Draw(screen *ebiten.Image) {
-	var m ebiten.GeoM
-	m.Scale(0.2, 0.2)
-	m.Translate(sim.House.Trans.X, sim.House.Trans.Y)
-	screen.DrawImage(sim.houseImg, &ebiten.DrawImageOptions{
-		GeoM: m,
-	})
-}
-
-func (sim *Simulation) Update() error {
-	select {
-	case <-sim.done:
-		return ebiten.Termination
-	default:
-	}
-
-	const (
-		dt         = 1.0 / 60
-		houseAccel = 80
-	)
-
-	var v state.Vec2
-	if ebiten.IsKeyPressed(ebiten.KeyH) {
-		v.X -= 1
-	}
-	if ebiten.IsKeyPressed(ebiten.KeyJ) {
-		v.Y += 1
-	}
-	if ebiten.IsKeyPressed(ebiten.KeyK) {
-		v.Y -= 1
-	}
-	if ebiten.IsKeyPressed(ebiten.KeyL) {
-		v.X += 1
-	}
-	sim.House.Accel = v.Normalize().Mul(houseAccel)
-	sim.House.Trans = sim.House.Accel.Mul(0.5 * dt * dt).Add(sim.House.Vel.Mul(dt)).Add(sim.House.Trans)
-	sim.House.Vel = sim.House.Accel.Mul(dt).Add(sim.House.Vel)
-
-	return nil
 }
