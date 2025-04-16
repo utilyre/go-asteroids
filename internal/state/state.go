@@ -9,8 +9,8 @@ type Input struct {
 	Left, Down, Up, Right bool
 }
 
-// zero value input does not manipulate the state.
-func (input Input) Manipulate(who int, state State, delta time.Duration) State {
+// A zero valued input does not manipulate the state.
+func (s *State) Update(delta time.Duration, who int, input Input) {
 	const houseAccel = 300
 	dt := delta.Seconds()
 
@@ -30,16 +30,14 @@ func (input Input) Manipulate(who int, state State, delta time.Duration) State {
 
 	switch who {
 	case 1:
-		state.House1.Accel = v.Normalize().Mul(houseAccel)
-		state.House1.Trans = state.House1.Accel.Mul(0.5 * dt * dt).Add(state.House1.Vel.Mul(dt)).Add(state.House1.Trans)
-		state.House1.Vel = state.House1.Accel.Mul(dt).Add(state.House1.Vel)
+		s.House1.Accel = v.Normalize().Mul(houseAccel)
+		s.House1.Trans = s.House1.Accel.Mul(0.5 * dt * dt).Add(s.House1.Vel.Mul(dt)).Add(s.House1.Trans)
+		s.House1.Vel = s.House1.Accel.Mul(dt).Add(s.House1.Vel)
 	case 2:
-		state.House2.Accel = v.Normalize().Mul(houseAccel)
-		state.House2.Trans = state.House2.Accel.Mul(0.5 * dt * dt).Add(state.House2.Vel.Mul(dt)).Add(state.House2.Trans)
-		state.House2.Vel = state.House2.Accel.Mul(dt).Add(state.House2.Vel)
+		s.House2.Accel = v.Normalize().Mul(houseAccel)
+		s.House2.Trans = s.House2.Accel.Mul(0.5 * dt * dt).Add(s.House2.Vel.Mul(dt)).Add(s.House2.Trans)
+		s.House2.Vel = s.House2.Accel.Mul(dt).Add(s.House2.Vel)
 	}
-
-	return state
 }
 
 type State struct {

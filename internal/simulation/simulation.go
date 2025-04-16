@@ -21,7 +21,7 @@ type Simulation struct {
 	inputBuffer1 <-chan state.Input
 	inputBuffer2 <-chan state.Input
 
-	state.State
+	state state.State
 }
 
 func New(done <-chan struct{}, houseImg image.Image) *Simulation {
@@ -102,14 +102,14 @@ func (sim *Simulation) Layout(int, int) (int, int) {
 func (sim *Simulation) Draw(screen *ebiten.Image) {
 	var m1 ebiten.GeoM
 	m1.Scale(0.2, 0.2)
-	m1.Translate(sim.House1.Trans.X, sim.House1.Trans.Y)
+	m1.Translate(sim.state.House1.Trans.X, sim.state.House1.Trans.Y)
 	screen.DrawImage(sim.houseImg, &ebiten.DrawImageOptions{
 		GeoM: m1,
 	})
 
 	var m2 ebiten.GeoM
 	m2.Scale(0.2, 0.2)
-	m2.Translate(sim.House2.Trans.X, sim.House2.Trans.Y)
+	m2.Translate(sim.state.House2.Trans.X, sim.state.House2.Trans.Y)
 	screen.DrawImage(sim.houseImg, &ebiten.DrawImageOptions{
 		GeoM: m2,
 	})
@@ -138,8 +138,8 @@ func (sim *Simulation) Update() error {
 	default:
 	}
 
-	sim.State = input1.Manipulate(1, sim.State, deltaTickTime)
-	sim.State = input2.Manipulate(2, sim.State, deltaTickTime)
+	sim.state.Update(deltaTickTime, 1, input1)
+	sim.state.Update(deltaTickTime, 2, input2)
 
 	return nil
 }
