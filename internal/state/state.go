@@ -9,8 +9,9 @@ type Input struct {
 	Left, Down, Up, Right bool
 }
 
-func (input Input) Manipulate(delta time.Duration, state State) State {
-	const houseAccel = 80
+// zero value input does not manipulate the state.
+func (input Input) Manipulate(who int, state State, delta time.Duration) State {
+	const houseAccel = 300
 	dt := delta.Seconds()
 
 	var v Vec2
@@ -26,15 +27,24 @@ func (input Input) Manipulate(delta time.Duration, state State) State {
 	if input.Right {
 		v.X += 1
 	}
-	state.House.Accel = v.Normalize().Mul(houseAccel)
-	state.House.Trans = state.House.Accel.Mul(0.5 * dt * dt).Add(state.House.Vel.Mul(dt)).Add(state.House.Trans)
-	state.House.Vel = state.House.Accel.Mul(dt).Add(state.House.Vel)
+
+	switch who {
+	case 1:
+		state.House1.Accel = v.Normalize().Mul(houseAccel)
+		state.House1.Trans = state.House1.Accel.Mul(0.5 * dt * dt).Add(state.House1.Vel.Mul(dt)).Add(state.House1.Trans)
+		state.House1.Vel = state.House1.Accel.Mul(dt).Add(state.House1.Vel)
+	case 2:
+		state.House2.Accel = v.Normalize().Mul(houseAccel)
+		state.House2.Trans = state.House2.Accel.Mul(0.5 * dt * dt).Add(state.House2.Vel.Mul(dt)).Add(state.House2.Trans)
+		state.House2.Vel = state.House2.Accel.Mul(dt).Add(state.House2.Vel)
+	}
 
 	return state
 }
 
 type State struct {
-	House House
+	House1 House
+	House2 House
 }
 
 type House struct {
