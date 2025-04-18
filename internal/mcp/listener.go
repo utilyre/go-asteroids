@@ -33,7 +33,7 @@ type Listener struct {
 	conn net.PacketConn
 
 	sessions    map[string]*Session
-	sessionLock sync.RWMutex
+	sessionCond sync.Cond
 	acceptCh    chan *Session
 
 	die     chan struct{}
@@ -55,7 +55,7 @@ func Listen(laddr string) (*Listener, error) {
 		laddr:       conn.LocalAddr(),
 		conn:        conn,
 		sessions:    map[string]*Session{},
-		sessionLock: sync.RWMutex{},
+		sessionCond: sync.Cond{L: &sync.Mutex{}},
 		acceptCh:    make(chan *Session),
 		die:         make(chan struct{}),
 		dieOnce:     sync.Once{},
@@ -101,9 +101,10 @@ func (ln *Listener) join(raddr net.Addr) (*Session, error) {
 	// TODO: re-try if not acknowledged
 
 	sess := newSession(ln.laddr, raddr)
-	ln.sessionLock.Lock()
+	ln.sessionCond.L.Lock()
 	ln.sessions[raddr.String()] = sess
-	ln.sessionLock.Unlock()
+	ln.sessionCond.Broadcast()
+	ln.sessionCond.L.Unlock()
 	return sess, nil
 }
 
@@ -117,19 +118,17 @@ func (ln *Listener) Accept() (*Session, error) {
 
 func (ln *Listener) writeLoop() {
 	do := func() bool {
-		ln.sessionLock.RLock()
-		defer ln.sessionLock.RUnlock()
+		ln.sessionCond.L.Lock()
+		defer ln.sessionCond.L.Unlock()
+		for len(ln.sessions) == 0 {
+			ln.sessionCond.Wait()
+		}
+		slog.Debug("finally got after cond", "laddr", ln.laddr, "len", len(ln.sessions))
 
 		sessions := slices.Collect(maps.Values(ln.sessions))
-
-		// TODO: use a notification mechanism instead of skipping iteration and
-		// ending up with a busy loop
-		if len(sessions) == 0 {
-			return true
-		}
-
 		outboxCases := make([]reflect.SelectCase, len(sessions)+1)
 		for i, sess := range sessions {
+			slog.Debug("adding outbox case", "laddr", sess.laddr, "raddr", sess.raddr)
 			outboxCases[i] = reflect.SelectCase{
 				Dir:  reflect.SelectRecv,
 				Chan: reflect.ValueOf(sess.outbox),
@@ -140,7 +139,9 @@ func (ln *Listener) writeLoop() {
 			Chan: reflect.ValueOf(ln.die),
 		}
 
+		slog.Debug("selecting", "laddr", ln.laddr, "num_cases", len(outboxCases))
 		chosenIdx, data, open := reflect.Select(outboxCases)
+		slog.Debug("selected", "laddr", ln.laddr, "num_cases", len(outboxCases))
 		if !open {
 			// do not continue if ln.die is closed
 			return chosenIdx != len(outboxCases)-1
@@ -214,30 +215,31 @@ func (ln *Listener) handleDatagram(raddr net.Addr, datagram Datagram) error {
 	switch {
 	case datagram.Flags&flagJoin != 0:
 		sess := newSession(ln.laddr, raddr)
-		ln.sessionLock.Lock()
+		ln.sessionCond.L.Lock()
 		if _, exists := ln.sessions[raddr.String()]; exists {
-			ln.sessionLock.Unlock()
+			ln.sessionCond.L.Unlock()
 			return fmt.Errorf("session %q: already exists", raddr)
 		}
 		ln.sessions[raddr.String()] = sess
-		ln.sessionLock.Unlock()
+		ln.sessionCond.Broadcast()
+		ln.sessionCond.L.Unlock()
 
 		// TODO: acknowledge join
 		ln.acceptCh <- sess
 
 	case datagram.Flags&flagLeave != 0:
-		ln.sessionLock.Lock()
+		ln.sessionCond.L.Lock()
 		if _, exists := ln.sessions[raddr.String()]; !exists {
-			ln.sessionLock.Unlock()
+			ln.sessionCond.L.Unlock()
 			return fmt.Errorf("session %q: not found", raddr)
 		}
 		delete(ln.sessions, raddr.String())
-		ln.sessionLock.Unlock()
+		ln.sessionCond.L.Unlock()
 
 	default:
-		ln.sessionLock.Lock()
+		ln.sessionCond.L.Lock()
 		sess, exists := ln.sessions[raddr.String()]
-		ln.sessionLock.Unlock()
+		ln.sessionCond.L.Unlock()
 		if !exists {
 			return fmt.Errorf("deliver datagram %q: session %q: not found",
 				datagram, raddr)
