@@ -80,7 +80,7 @@ func consumer(sess *mcp.Session) {
 }
 
 func provider(sess *mcp.Session) {
-	for i := range 10 {
+	for i := range 100 {
 		data := []byte(fmt.Sprintf("ping %d", i))
 		sess.Send(data)
 		slog.Info("sent data", "remote", sess.RemoteAddr(), "data", string(data))

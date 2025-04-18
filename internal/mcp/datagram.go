@@ -21,7 +21,7 @@ type Datagram struct {
 }
 
 func (dg Datagram) String() string {
-	return fmt.Sprintf("MessageV%d(%08b:%x)", dg.Version, dg.Flags, dg.Data)
+	return fmt.Sprintf("Datagram(v%d:%08b:%x)", dg.Version, dg.Flags, dg.Data)
 }
 
 func (dg Datagram) MarshalBinary() ([]byte, error) {

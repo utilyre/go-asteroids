@@ -137,7 +137,9 @@ func (ln *Listener) writeLoop() {
 			Chan: reflect.ValueOf(ln.die),
 		}
 
+		ln.sessionCond.L.Unlock() // avoid holding the lock while waiting on select
 		chosenIdx, data, open := reflect.Select(outboxCases)
+		ln.sessionCond.L.Lock() // regain the lock after the wait
 		if !open {
 			// do not continue if ln.die is closed
 			return chosenIdx != len(outboxCases)-1
