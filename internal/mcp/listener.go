@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
+	"reflect"
+	"slices"
 	"sync"
 )
 
@@ -31,7 +34,7 @@ type Listener struct {
 	conn net.PacketConn
 
 	sessions    map[string]*Session
-	sessionLock sync.Mutex
+	sessionLock sync.RWMutex
 	acceptCh    chan *Session
 }
 
@@ -50,15 +53,16 @@ func Listen(laddr string) (*Listener, error) {
 		laddr:       conn.LocalAddr(),
 		conn:        conn,
 		sessions:    map[string]*Session{},
-		sessionLock: sync.Mutex{},
+		sessionLock: sync.RWMutex{},
 		acceptCh:    make(chan *Session),
 	}
 	go ln.readLoop()
+	go ln.writeLoop()
 	return ln, nil
 }
 
 func Dial(raddr string) (*Session, error) {
-	conn, err := net.ListenPacket("udp", "127.0.0.1:")
+	ln, err := Listen("127.0.0.1:")
 	if err != nil {
 		return nil, err
 	}
@@ -67,24 +71,35 @@ func Dial(raddr string) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
+	sess, err := ln.join(remote)
+	if err != nil {
+		return nil, err
+	}
 
-	sess := newSession(conn.LocalAddr(), remote, conn)
+	return sess, nil
+}
 
+func (ln *Listener) join(raddr net.Addr) (*Session, error) {
 	datagram := Datagram{
 		Version: version,
 		Flags:   flagJoin,
 		Data:    nil,
 	}
-	data, err := datagram.MarshalBinary()
+	b, err := datagram.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	_, err = ln.conn.WriteTo(b, raddr)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = conn.WriteTo(data, remote)
-	if err != nil {
-		return nil, err
-	}
+	// TODO: re-try if not acknowledged
 
+	sess := newSession(ln.laddr, raddr)
+	ln.sessionLock.Lock()
+	ln.sessions[raddr.String()] = sess
+	ln.sessionLock.Unlock()
 	return sess, nil
 }
 
@@ -94,6 +109,62 @@ func (ln *Listener) Accept() (*Session, error) {
 		return nil, ErrClosed
 	}
 	return sess, nil
+}
+
+func (ln *Listener) writeLoop() {
+	do := func() {
+		ln.sessionLock.RLock()
+		defer ln.sessionLock.RUnlock()
+
+		sessions := slices.Collect(maps.Values(ln.sessions))
+
+		if len(sessions) == 0 {
+			return
+		}
+		slog.Debug("non-empty 'sessions'")
+
+		outboxCases := make([]reflect.SelectCase, len(sessions))
+		for i, sess := range sessions {
+			slog.Debug("adding outbox",
+				"laddr", sess.laddr,
+				"raddr", sess.raddr,
+				"adderss", sess.outbox)
+			outboxCases[i] = reflect.SelectCase{
+				Dir:  reflect.SelectRecv,
+				Chan: reflect.ValueOf(sess.outbox),
+			}
+		}
+
+		slog.Debug("selecting")
+		chosenIdx, data, open := reflect.Select(outboxCases)
+		slog.Debug("selected")
+		if !open {
+			panic("mcp error: unexpected closed outbox in existing session")
+		}
+
+		slog.Debug("we are there")
+
+		datagram := Datagram{
+			Version: version,
+			Flags:   0,
+			Data:    data.Bytes(),
+		}
+		marshaledDatagram, err := datagram.MarshalBinary()
+		if err != nil {
+			slog.Warn("failed to marshal datagram", "error", err)
+			return
+		}
+		_, err = ln.conn.WriteTo(marshaledDatagram, sessions[chosenIdx].raddr)
+		if err != nil {
+			slog.Warn("failed to write datagram to session remote",
+				"remote", sessions[chosenIdx].raddr, "error", err)
+			return
+		}
+	}
+
+	for {
+		do()
+	}
 }
 
 func (ln *Listener) readLoop() {
@@ -110,7 +181,7 @@ func (ln *Listener) readLoop() {
 		var datagram Datagram
 		err := datagram.UnmarshalBinary(buf[:n])
 		if err != nil {
-			slog.Debug("failed to unmarshal datagram", "error", err)
+			slog.Warn("failed to unmarshal datagram", "error", err)
 			continue
 		}
 
@@ -136,7 +207,7 @@ func (ln *Listener) handleDatagram(raddr net.Addr, datagram Datagram) error {
 
 	switch {
 	case datagram.Flags&flagJoin != 0:
-		sess := newSession(ln.laddr, raddr, ln.conn)
+		sess := newSession(ln.laddr, raddr)
 		ln.sessionLock.Lock()
 		if _, exists := ln.sessions[raddr.String()]; exists {
 			ln.sessionLock.Unlock()
@@ -181,26 +252,22 @@ func (ln *Listener) Close() error {
 	return ln.conn.Close()
 }
 
-type writerTo interface {
-	WriteTo(p []byte, addr net.Addr) (n int, err error)
-}
-
 type Session struct {
 	laddr net.Addr
 	raddr net.Addr
 
-	outbox  writerTo
 	inbox   chan []byte
+	outbox  chan []byte
 	die     chan struct{}
 	dieOnce sync.Once
 }
 
-func newSession(laddr, raddr net.Addr, outbox writerTo) *Session {
+func newSession(laddr, raddr net.Addr) *Session {
 	// NOTE: keep fields exhaustive
 	return &Session{
 		laddr:   laddr,
 		raddr:   raddr,
-		outbox:  outbox,
+		outbox:  make(chan []byte, 1),
 		inbox:   make(chan []byte, 1),
 		die:     make(chan struct{}),
 		dieOnce: sync.Once{},
@@ -211,27 +278,21 @@ func (sess *Session) Receive() []byte {
 	return <-sess.inbox
 }
 
-func (sess *Session) Send(data []byte) error {
-	datagram := Datagram{
-		Version: version,
-		Flags:   0,
-		Data:    data,
-	}
-	b, err := datagram.MarshalBinary()
-	if err != nil {
-		return err
-	}
-	_, err = sess.outbox.WriteTo(b, sess.raddr)
-	if err != nil {
-		return err
-	}
-	return nil
+func (sess *Session) Send(data []byte) {
+	sess.outbox <- data
+	slog.Debug("sent into session outbox",
+		"laddr", sess.laddr,
+		"raddr", sess.raddr,
+		"address", sess.outbox,
+		"data", string(data),
+	)
 }
 
 func (sess *Session) Close() error {
 	once := false
 	sess.dieOnce.Do(func() {
 		close(sess.die)
+		close(sess.outbox)
 		close(sess.inbox)
 		once = true
 	})

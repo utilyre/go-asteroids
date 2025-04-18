@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"log/slog"
+	_ "multiplayer/internal/config"
 	"multiplayer/internal/mcp"
 	"time"
 )
@@ -36,8 +37,10 @@ func main() {
 
 		slog.Info("accepted session", "sess", sess)
 
-		data := sess.Receive()
-		slog.Info("received data", "data", data)
+		for {
+			data := sess.Receive()
+			slog.Info("received data", "data", data)
+		}
 	}
 }
 
@@ -56,11 +59,10 @@ func client() {
 		}
 	}()
 
-	slog.Info("established connection", "laddr", sess.LocalAddr(), "raddr", sess.RemoteAddr())
+	slog.Info("established session", "laddr", sess.LocalAddr(), "raddr", sess.RemoteAddr())
 
-	err = sess.Send([]byte("ping"))
-	if err != nil {
-		slog.Error("failed to send ping", "error", err)
-		return
+	time.Sleep(time.Second)
+	for range 10 {
+		sess.Send([]byte("ping"))
 	}
 }
