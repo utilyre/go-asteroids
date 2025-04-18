@@ -5,6 +5,7 @@ go 1.23.4
 require (
 	github.com/hajimehoshi/ebiten/v2 v2.8.7
 	github.com/lmittmann/tint v1.0.7
+	github.com/mattn/go-isatty v0.0.20
 	github.com/xtaci/kcp-go/v5 v5.6.20
 	golang.org/x/crypto v0.37.0
 )
