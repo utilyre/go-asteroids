@@ -10,6 +10,10 @@ import (
 	"os/signal"
 )
 
+// TODO: lifetime is not handled properly
+//       1. don't know when to stop receiving
+//       2. closing client session twice gives no error
+
 func main() {
 	server, err := mcp.Listen(":3000")
 	if err != nil {
@@ -80,7 +84,7 @@ func consumer(sess *mcp.Session) {
 }
 
 func provider(sess *mcp.Session) {
-	for i := range 100 {
+	for i := range 10 {
 		data := []byte(fmt.Sprintf("ping %d", i))
 		sess.Send(data)
 		slog.Info("sent data", "remote", sess.RemoteAddr(), "data", string(data))
