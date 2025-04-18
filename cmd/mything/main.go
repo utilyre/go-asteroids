@@ -2,30 +2,55 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	_ "multiplayer/internal/config"
 	"multiplayer/internal/mcp"
-	"time"
+	"os"
+	"os/signal"
 )
 
 func main() {
-	ln, err := mcp.Listen(":3000")
+	server, err := mcp.Listen(":3000")
 	if err != nil {
-		panic(err)
+		slog.Error("failed to start server", "error", err)
+		return
 	}
 	defer func() {
-		err = ln.Close()
+		err = server.Close()
 		if err != nil {
-			slog.Error("failed to close listener", "error", err)
+			slog.Error("failed to close server", "error", err)
+		}
+	}()
+	slog.Info("server started", "address", server.LocalAddr())
+
+	client, err := mcp.Dial(":3000")
+	if err != nil {
+		slog.Error("failed to start client", "error", err)
+		return
+	}
+	slog.Info("client dialed server", "address", client.LocalAddr())
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt)
+	go func() {
+		<-sig
+
+		err := client.Close()
+		if err != nil {
+			slog.Error("failed to close client", "error", err)
+		}
+
+		err = server.Close()
+		if err != nil {
+			slog.Error("failed to close server", "error", err)
 		}
 	}()
 
-	slog.Info("listening on", "address", ln.LocalAddr())
-
-	go client()
+	go provider(client)
 
 	for {
-		sess, err := ln.Accept()
+		sess, err := server.Accept()
 		if errors.Is(err, mcp.ErrClosed) {
 			slog.Info("connection closed")
 			break
@@ -34,35 +59,30 @@ func main() {
 			slog.Error("failed to accept session", "error", err)
 			continue
 		}
+		slog.Info("session accepted", "address", sess.RemoteAddr())
 
-		slog.Info("accepted session", "sess", sess)
-
-		for {
-			data := sess.Receive()
-			slog.Info("received data", "data", data)
-		}
+		go consumer(sess)
 	}
 }
 
-func client() {
-	time.Sleep(time.Second)
-
-	sess, err := mcp.Dial(":3000")
-	if err != nil {
-		slog.Error("failed to dial server", "error", err)
-		return
-	}
+func consumer(sess *mcp.Session) {
 	defer func() {
 		err := sess.Close()
 		if err != nil {
-			slog.Error("failed to close client", "error", err)
+			slog.Error("failed to close consumer (server) session", "error", err)
 		}
 	}()
+	for {
+		data := sess.Receive()
+		slog.Info("received data",
+			"remote", sess.RemoteAddr(), "data", string(data))
+	}
+}
 
-	slog.Info("established session", "laddr", sess.LocalAddr(), "raddr", sess.RemoteAddr())
-
-	time.Sleep(time.Second)
-	for range 10 {
-		sess.Send([]byte("ping"))
+func provider(sess *mcp.Session) {
+	for i := range 10 {
+		data := []byte(fmt.Sprintf("ping %d", i))
+		sess.Send(data)
+		slog.Info("sent data", "remote", sess.RemoteAddr(), "data", string(data))
 	}
 }

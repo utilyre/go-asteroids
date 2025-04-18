@@ -4,7 +4,6 @@ package mcp
 import (
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"maps"
 	"net"
@@ -36,6 +35,9 @@ type Listener struct {
 	sessions    map[string]*Session
 	sessionLock sync.RWMutex
 	acceptCh    chan *Session
+
+	die     chan struct{}
+	dieOnce sync.Once
 }
 
 func (ln *Listener) LocalAddr() net.Addr {
@@ -55,6 +57,8 @@ func Listen(laddr string) (*Listener, error) {
 		sessions:    map[string]*Session{},
 		sessionLock: sync.RWMutex{},
 		acceptCh:    make(chan *Session),
+		die:         make(chan struct{}),
+		dieOnce:     sync.Once{},
 	}
 	go ln.readLoop()
 	go ln.writeLoop()
@@ -112,18 +116,20 @@ func (ln *Listener) Accept() (*Session, error) {
 }
 
 func (ln *Listener) writeLoop() {
-	do := func() {
+	do := func() bool {
 		ln.sessionLock.RLock()
 		defer ln.sessionLock.RUnlock()
 
 		sessions := slices.Collect(maps.Values(ln.sessions))
 
+		// TODO: use a notification mechanism instead of skipping iteration and
+		// ending up with a busy loop
 		if len(sessions) == 0 {
-			return
+			return true
 		}
 		slog.Debug("non-empty 'sessions'")
 
-		outboxCases := make([]reflect.SelectCase, len(sessions))
+		outboxCases := make([]reflect.SelectCase, len(sessions)+1)
 		for i, sess := range sessions {
 			slog.Debug("adding outbox",
 				"laddr", sess.laddr,
@@ -134,12 +140,17 @@ func (ln *Listener) writeLoop() {
 				Chan: reflect.ValueOf(sess.outbox),
 			}
 		}
+		outboxCases[len(outboxCases)-1] = reflect.SelectCase{
+			Dir:  reflect.SelectRecv,
+			Chan: reflect.ValueOf(ln.die),
+		}
 
 		slog.Debug("selecting")
 		chosenIdx, data, open := reflect.Select(outboxCases)
 		slog.Debug("selected")
 		if !open {
-			panic("mcp error: unexpected closed outbox in existing session")
+			// do not continue if ln.die is closed
+			return chosenIdx != len(outboxCases)-1
 		}
 
 		slog.Debug("we are there")
@@ -152,18 +163,22 @@ func (ln *Listener) writeLoop() {
 		marshaledDatagram, err := datagram.MarshalBinary()
 		if err != nil {
 			slog.Warn("failed to marshal datagram", "error", err)
-			return
+			return true
 		}
 		_, err = ln.conn.WriteTo(marshaledDatagram, sessions[chosenIdx].raddr)
 		if err != nil {
 			slog.Warn("failed to write datagram to session remote",
 				"remote", sessions[chosenIdx].raddr, "error", err)
-			return
+			return true
 		}
+
+		return true
 	}
 
 	for {
-		do()
+		if !do() {
+			return
+		}
 	}
 }
 
@@ -248,7 +263,16 @@ func (ln *Listener) handleDatagram(raddr net.Addr, datagram Datagram) error {
 }
 
 func (ln *Listener) Close() error {
-	close(ln.acceptCh)
+	ran := false
+	ln.dieOnce.Do(func() {
+		close(ln.die)
+		close(ln.acceptCh)
+		ran = true
+	})
+	if !ran {
+		return ErrClosed
+	}
+	// TODO: close all associated sessions
 	return ln.conn.Close()
 }
 
@@ -297,7 +321,7 @@ func (sess *Session) Close() error {
 		once = true
 	})
 	if !once {
-		return io.ErrClosedPipe
+		return ErrClosed
 	}
 	return nil
 }
