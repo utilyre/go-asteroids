@@ -123,12 +123,10 @@ func (ln *Listener) writeLoop() {
 		for len(ln.sessions) == 0 {
 			ln.sessionCond.Wait()
 		}
-		slog.Debug("finally got after cond", "laddr", ln.laddr, "len", len(ln.sessions))
 
 		sessions := slices.Collect(maps.Values(ln.sessions))
 		outboxCases := make([]reflect.SelectCase, len(sessions)+1)
 		for i, sess := range sessions {
-			slog.Debug("adding outbox case", "laddr", sess.laddr, "raddr", sess.raddr)
 			outboxCases[i] = reflect.SelectCase{
 				Dir:  reflect.SelectRecv,
 				Chan: reflect.ValueOf(sess.outbox),
@@ -139,9 +137,7 @@ func (ln *Listener) writeLoop() {
 			Chan: reflect.ValueOf(ln.die),
 		}
 
-		slog.Debug("selecting", "laddr", ln.laddr, "num_cases", len(outboxCases))
 		chosenIdx, data, open := reflect.Select(outboxCases)
-		slog.Debug("selected", "laddr", ln.laddr, "num_cases", len(outboxCases))
 		if !open {
 			// do not continue if ln.die is closed
 			return chosenIdx != len(outboxCases)-1
