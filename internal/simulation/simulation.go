@@ -138,7 +138,7 @@ func (sim *Simulation) Update() error {
 	default:
 	}
 
-	sim.state.CreateHouse()
+	// sim.state.CreateHouse()
 
 	sim.state.Update(deltaTickTime, 1, input1)
 	sim.state.Update(deltaTickTime, 2, input2)

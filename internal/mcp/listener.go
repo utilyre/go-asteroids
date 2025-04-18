@@ -127,14 +127,9 @@ func (ln *Listener) writeLoop() {
 		if len(sessions) == 0 {
 			return true
 		}
-		slog.Debug("non-empty 'sessions'")
 
 		outboxCases := make([]reflect.SelectCase, len(sessions)+1)
 		for i, sess := range sessions {
-			slog.Debug("adding outbox",
-				"laddr", sess.laddr,
-				"raddr", sess.raddr,
-				"adderss", sess.outbox)
 			outboxCases[i] = reflect.SelectCase{
 				Dir:  reflect.SelectRecv,
 				Chan: reflect.ValueOf(sess.outbox),
@@ -145,15 +140,11 @@ func (ln *Listener) writeLoop() {
 			Chan: reflect.ValueOf(ln.die),
 		}
 
-		slog.Debug("selecting")
 		chosenIdx, data, open := reflect.Select(outboxCases)
-		slog.Debug("selected")
 		if !open {
 			// do not continue if ln.die is closed
 			return chosenIdx != len(outboxCases)-1
 		}
-
-		slog.Debug("we are there")
 
 		datagram := Datagram{
 			Version: version,
@@ -304,12 +295,6 @@ func (sess *Session) Receive() []byte {
 
 func (sess *Session) Send(data []byte) {
 	sess.outbox <- data
-	slog.Debug("sent into session outbox",
-		"laddr", sess.laddr,
-		"raddr", sess.raddr,
-		"address", sess.outbox,
-		"data", string(data),
-	)
 }
 
 func (sess *Session) Close() error {
