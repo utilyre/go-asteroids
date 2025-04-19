@@ -320,8 +320,6 @@ func (ln *Listener) handleDatagram(raddr net.Addr, datagram Datagram) error {
 }
 
 func (ln *Listener) Close(ctx context.Context) error {
-	ln.logger.Debug("close listener called", "dial", ln.dial)
-
 	ran := false
 	ln.dieOnce.Do(func() {
 		close(ln.die)
@@ -398,8 +396,6 @@ func (sess *Session) Send(ctx context.Context, data []byte) error {
 }
 
 func (sess *Session) Close(ctx context.Context) error {
-	slog.Debug("close session called", "local", sess.laddr, "dial", sess.dial)
-
 	once := false
 	sess.dieOnce.Do(func() {
 		close(sess.die)
