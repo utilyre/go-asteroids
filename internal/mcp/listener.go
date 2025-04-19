@@ -17,7 +17,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// TODO: use the terms local and remote for the public api instead of laddr and raddr
 // TODO: do not start goroutines with methods
 
 var ErrClosed = errors.New("use of closed network connection")
@@ -37,7 +36,7 @@ const (
 
 type Listener struct {
 	dial   bool
-	laddr  net.Addr
+	local  net.Addr
 	logger *slog.Logger
 
 	sessions    map[string]*Session
@@ -50,7 +49,7 @@ type Listener struct {
 }
 
 func (ln *Listener) LocalAddr() net.Addr {
-	return ln.laddr
+	return ln.local
 }
 
 func Listen(laddr string) (*Listener, error) {
@@ -62,8 +61,8 @@ func Listen(laddr string) (*Listener, error) {
 	// NOTE: keep fields exhaustive
 	ln := &Listener{
 		dial:        false, // TODO: make into private functional option
-		laddr:       conn.LocalAddr(),
-		logger:      slog.With("local", conn.LocalAddr()), // TODO: make into functional option
+		local:       conn.LocalAddr(),
+		logger:      slog.With("laddr", conn.LocalAddr()), // TODO: make slog into functional option
 		sessions:    map[string]*Session{},
 		sessionCond: sync.Cond{L: &sync.Mutex{}},
 		acceptCh:    make(chan *Session),
@@ -105,7 +104,7 @@ func Dial(ctx context.Context, raddr string) (*Session, error) {
 
 	// TODO: re-try if not acknowledged
 
-	sess := newSession(true, ln.laddr, remote, ln)
+	sess := newSession(true, ln.local, remote, ln)
 	sess.ln = ln
 
 	ln.sessionCond.L.Lock()
@@ -123,7 +122,7 @@ func writeToWithContext(
 	logger *slog.Logger,
 	conn net.PacketConn,
 	b []byte,
-	raddr net.Addr,
+	remote net.Addr,
 ) (n int, err error) {
 	if deadline, ok := ctx.Deadline(); ok {
 		err := conn.SetWriteDeadline(deadline)
@@ -144,13 +143,13 @@ func writeToWithContext(
 			err := conn.SetWriteDeadline(time.Now())
 			if err != nil {
 				logger.WarnContext(ctx, "failed to cancel write",
-					"remote", raddr,
+					"raddr", remote,
 					"error", err)
 			}
 		}
 	}()
 
-	n, err = conn.WriteTo(b, raddr)
+	n, err = conn.WriteTo(b, remote)
 	if errors.Is(err, os.ErrDeadlineExceeded) {
 		return 0, ctx.Err()
 	}
@@ -221,13 +220,13 @@ WRITER:
 			ln.logger.Warn("failed to marshal datagram", "error", err)
 			continue
 		}
-		_, err = ln.conn.WriteTo(marshaledDatagram, sessions[chosenIdx].raddr)
+		_, err = ln.conn.WriteTo(marshaledDatagram, sessions[chosenIdx].remote)
 		if errors.Is(err, net.ErrClosed) {
 			break
 		}
 		if err != nil {
 			ln.logger.Warn("failed to write to connection",
-				"remote", sessions[chosenIdx].raddr,
+				"raddr", sessions[chosenIdx].remote,
 				"error", err)
 			continue
 		}
@@ -239,7 +238,7 @@ func (ln *Listener) readLoop() {
 
 	buf := make([]byte, bufSize)
 	for {
-		n, raddr, readErr := ln.conn.ReadFrom(buf)
+		n, remote, readErr := ln.conn.ReadFrom(buf)
 		if errors.Is(readErr, net.ErrClosed) {
 			return
 		}
@@ -251,7 +250,7 @@ func (ln *Listener) readLoop() {
 			continue
 		}
 
-		err = ln.handleDatagram(raddr, datagram)
+		err = ln.handleDatagram(remote, datagram)
 		if err != nil {
 			ln.logger.Warn("failed to handle datagram", "error", err)
 			continue
@@ -273,18 +272,18 @@ func assertDatagram(datagram Datagram) {
 	}
 }
 
-func (ln *Listener) handleDatagram(raddr net.Addr, datagram Datagram) error {
+func (ln *Listener) handleDatagram(remote net.Addr, datagram Datagram) error {
 	assertDatagram(datagram)
 
 	switch {
 	case datagram.Flags&flagJoin != 0:
-		sess := newSession(false, ln.laddr, raddr, ln)
+		sess := newSession(false, ln.local, remote, ln)
 		ln.sessionCond.L.Lock()
-		if _, exists := ln.sessions[raddr.String()]; exists {
+		if _, exists := ln.sessions[remote.String()]; exists {
 			ln.sessionCond.L.Unlock()
-			return fmt.Errorf("session %q: already exists", raddr)
+			return fmt.Errorf("session %q: already exists", remote)
 		}
-		ln.sessions[raddr.String()] = sess
+		ln.sessions[remote.String()] = sess
 		ln.sessionCond.Broadcast()
 		ln.sessionCond.L.Unlock()
 
@@ -293,20 +292,20 @@ func (ln *Listener) handleDatagram(raddr net.Addr, datagram Datagram) error {
 
 	case datagram.Flags&flagLeave != 0:
 		ln.sessionCond.L.Lock()
-		if _, exists := ln.sessions[raddr.String()]; !exists {
+		if _, exists := ln.sessions[remote.String()]; !exists {
 			ln.sessionCond.L.Unlock()
-			return fmt.Errorf("session %q: not found", raddr)
+			return fmt.Errorf("session %q: not found", remote)
 		}
-		delete(ln.sessions, raddr.String())
+		delete(ln.sessions, remote.String())
 		ln.sessionCond.L.Unlock()
 
 	default:
 		ln.sessionCond.L.Lock()
-		sess, exists := ln.sessions[raddr.String()]
+		sess, exists := ln.sessions[remote.String()]
 		ln.sessionCond.L.Unlock()
 		if !exists {
 			return fmt.Errorf("deliver datagram %q: session %q: not found",
-				datagram, raddr)
+				datagram, remote)
 		}
 
 		// try to deliver the data
@@ -351,9 +350,9 @@ func (ln *Listener) Close(ctx context.Context) error {
 }
 
 type Session struct {
-	dial  bool
-	laddr net.Addr
-	raddr net.Addr
+	dial   bool
+	local  net.Addr
+	remote net.Addr
 
 	inbox  chan []byte
 	outbox chan []byte
@@ -363,12 +362,12 @@ type Session struct {
 	dieOnce sync.Once
 }
 
-func newSession(dial bool, laddr, raddr net.Addr, ln *Listener) *Session {
+func newSession(dial bool, local, remote net.Addr, ln *Listener) *Session {
 	// NOTE: keep fields exhaustive
 	return &Session{
 		dial:    dial,
-		laddr:   laddr,
-		raddr:   raddr,
+		local:   local,
+		remote:  remote,
 		inbox:   make(chan []byte, 1),
 		outbox:  make(chan []byte, 1),
 		ln:      ln,
@@ -414,15 +413,15 @@ func (sess *Session) Close(ctx context.Context) error {
 	}
 	// TODO: send datagram w/ flagLeave
 	sess.ln.sessionCond.L.Lock()
-	delete(sess.ln.sessions, sess.raddr.String())
+	delete(sess.ln.sessions, sess.remote.String())
 	sess.ln.sessionCond.L.Unlock()
 	return nil
 }
 
 func (sess *Session) LocalAddr() net.Addr {
-	return sess.laddr
+	return sess.local
 }
 
 func (sess *Session) RemoteAddr() net.Addr {
-	return sess.raddr
+	return sess.remote
 }
