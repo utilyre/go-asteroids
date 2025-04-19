@@ -33,7 +33,8 @@ const (
 type Listener struct {
 	laddr net.Addr
 
-	conn net.PacketConn
+	conn   net.PacketConn
+	logger *slog.Logger
 
 	sessions    map[string]*Session
 	sessionCond sync.Cond
@@ -57,6 +58,7 @@ func Listen(laddr string) (*Listener, error) {
 	ln := &Listener{
 		laddr:       conn.LocalAddr(),
 		conn:        conn,
+		logger:      slog.With("local", conn.LocalAddr()),
 		sessions:    map[string]*Session{},
 		sessionCond: sync.Cond{L: &sync.Mutex{}},
 		acceptCh:    make(chan *Session),
@@ -97,7 +99,7 @@ func (ln *Listener) join(ctx context.Context, raddr net.Addr) (*Session, error) 
 		return nil, err
 	}
 
-	_, err = writeToWithContext(ctx, ln.conn, b, raddr)
+	_, err = writeToWithContext(ctx, ln.logger, ln.conn, b, raddr)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +116,13 @@ func (ln *Listener) join(ctx context.Context, raddr net.Addr) (*Session, error) 
 
 // please note that the context will affect all the writes happening at the
 // time of this function running.
-func writeToWithContext(ctx context.Context, conn net.PacketConn, b []byte, raddr net.Addr) (n int, err error) {
+func writeToWithContext(
+	ctx context.Context,
+	logger *slog.Logger,
+	conn net.PacketConn,
+	b []byte,
+	raddr net.Addr,
+) (n int, err error) {
 	if deadline, ok := ctx.Deadline(); ok {
 		err := conn.SetWriteDeadline(deadline)
 		if err != nil {
@@ -133,7 +141,9 @@ func writeToWithContext(ctx context.Context, conn net.PacketConn, b []byte, radd
 		case <-ctx.Done():
 			err := conn.SetWriteDeadline(time.Now())
 			if err != nil {
-				slog.Warn("failed to set write deadline to now", "error", err)
+				logger.WarnContext(ctx, "failed to cancel write",
+					"remote", raddr,
+					"error", err)
 			}
 		}
 	}()
@@ -196,13 +206,14 @@ func (ln *Listener) writeLoop() {
 		}
 		marshaledDatagram, err := datagram.MarshalBinary()
 		if err != nil {
-			slog.Warn("failed to marshal datagram", "error", err)
+			ln.logger.Warn("failed to marshal datagram", "error", err)
 			return true
 		}
 		_, err = ln.conn.WriteTo(marshaledDatagram, sessions[chosenIdx].raddr)
 		if err != nil {
-			slog.Warn("failed to write datagram to session remote",
-				"remote", sessions[chosenIdx].raddr, "error", err)
+			ln.logger.Warn("failed to write to connection",
+				"remote", sessions[chosenIdx].raddr,
+				"error", err)
 			return true
 		}
 
@@ -223,24 +234,26 @@ func (ln *Listener) readLoop() {
 	for {
 		n, raddr, readErr := ln.conn.ReadFrom(buf)
 		if errors.Is(readErr, net.ErrClosed) {
-			slog.Info("connection closed", "local", ln.laddr)
 			return
 		}
 
 		var datagram Datagram
 		err := datagram.UnmarshalBinary(buf[:n])
 		if err != nil {
-			slog.Warn("failed to unmarshal datagram", "error", err)
+			ln.logger.Warn("failed to unmarshal datagram", "error", err)
 			continue
 		}
 
 		err = ln.handleDatagram(raddr, datagram)
 		if err != nil {
-			slog.Warn("failed to handle datagram", "error", err)
+			ln.logger.Warn("failed to handle datagram", "error", err)
 			continue
 		}
 
-		// TODO: handle readErr
+		if readErr != nil {
+			ln.logger.Warn("failed to read from connection", "error", err)
+			continue
+		}
 	}
 }
 
