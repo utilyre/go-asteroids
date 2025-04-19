@@ -176,14 +176,16 @@ func (ln *Listener) writeLoop() {
 	// return true means continue
 	// return false means break
 	do := func() bool {
-		// ensure new sessions are not created and existing sessions are not
-		// closed
+		ln.logger.Debug("waiting for a session")
+		// TODO: holding an exclusive lock is the bottle-neck to having
+		// multiple writers
 		ln.sessionCond.L.Lock()
-		defer ln.sessionCond.L.Unlock()
-
 		for len(ln.sessions) == 0 {
+			// TODO: what if we're waiting here when ln closes?
 			ln.sessionCond.Wait()
 		}
+		ln.sessionCond.L.Unlock()
+		ln.logger.Debug("waited for a session")
 
 		sessions := slices.Collect(maps.Values(ln.sessions))
 		outboxCases := make([]reflect.SelectCase, len(sessions)+1)
@@ -198,15 +200,11 @@ func (ln *Listener) writeLoop() {
 			Chan: reflect.ValueOf(ln.die),
 		}
 
-		ln.sessionCond.L.Unlock() // avoid holding the lock while waiting on select
+		ln.logger.Debug("holding on select")
 		chosenIdx, data, open := reflect.Select(outboxCases)
-		ln.sessionCond.L.Lock() // regain the lock after the wait
+		ln.logger.Debug("held on select")
 		if !open {
-			if chosenIdx == len(outboxCases)-1 {
-				ln.logger.Debug("exited write loop")
-				return false
-			}
-			return true
+			return chosenIdx != len(outboxCases)-1
 		}
 
 		datagram := Datagram{
@@ -221,7 +219,6 @@ func (ln *Listener) writeLoop() {
 		}
 		_, err = ln.conn.WriteTo(marshaledDatagram, sessions[chosenIdx].raddr)
 		if errors.Is(err, net.ErrClosed) {
-			ln.logger.Debug("exited write loop, connection closed")
 			return false
 		}
 		if err != nil {
@@ -236,7 +233,8 @@ func (ln *Listener) writeLoop() {
 
 	for {
 		if !do() {
-			return
+			ln.logger.Debug("exited write loop")
+			break
 		}
 	}
 }
@@ -342,9 +340,13 @@ func (ln *Listener) Close(ctx context.Context) error {
 
 	if !ln.dial {
 		g, ctx := errgroup.WithContext(ctx)
+		ln.sessionCond.L.Lock()
 		for _, sess := range ln.sessions {
+			ln.sessionCond.L.Unlock()
 			g.Go(func() error { return sess.Close(ctx) })
+			ln.sessionCond.L.Lock()
 		}
+		ln.sessionCond.L.Unlock()
 		err := g.Wait()
 		if err != nil {
 			return fmt.Errorf("close session: %w", err)

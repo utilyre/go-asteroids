@@ -12,6 +12,11 @@ import (
 )
 
 func main() {
+	run()
+	select {}
+}
+
+func run() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
