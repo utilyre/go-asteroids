@@ -181,13 +181,19 @@ func (ln *Listener) writeLoop() {
 		// multiple writers
 		ln.sessionCond.L.Lock()
 		for len(ln.sessions) == 0 {
-			// TODO: what if we're waiting here when ln closes?
+			select {
+			case _, open := <-ln.die:
+				if !open {
+					return false
+				}
+			default:
+			}
 			ln.sessionCond.Wait()
 		}
+		sessions := slices.Collect(maps.Values(ln.sessions))
 		ln.sessionCond.L.Unlock()
 		ln.logger.Debug("waited for a session")
 
-		sessions := slices.Collect(maps.Values(ln.sessions))
 		outboxCases := make([]reflect.SelectCase, len(sessions)+1)
 		for i, sess := range sessions {
 			outboxCases[i] = reflect.SelectCase{
@@ -332,6 +338,9 @@ func (ln *Listener) Close(ctx context.Context) error {
 	ln.dieOnce.Do(func() {
 		close(ln.die)
 		close(ln.acceptCh)
+		// notify ln.writeLoop to continue and realize ln is closed
+		ln.sessionCond.Broadcast()
+		ln.logger.Debug("notified")
 		ran = true
 	})
 	if !ran {

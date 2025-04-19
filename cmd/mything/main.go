@@ -65,7 +65,7 @@ func run() {
 }
 
 func consumer(ctx context.Context, sess *mcp.Session) {
-	// TODO: when this is uncommented, ensure everything is closed properly
+	// when this is uncommented, everything must be closed properly
 	// defer func() {
 	// 	err := sess.Close(ctx)
 	// 	if err != nil {
