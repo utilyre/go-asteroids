@@ -11,11 +11,10 @@ import (
 	"os/signal"
 )
 
-// TODO: lifetime is not handled properly
-//       1. don't know when to stop receiving
-//       2. closing client session twice gives no error
-
 func main() {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
 	server, err := mcp.Listen(":3000")
 	if err != nil {
 		slog.Error("failed to start server", "error", err)
@@ -29,33 +28,23 @@ func main() {
 	}()
 	slog.Info("server started", "address", server.LocalAddr())
 
-	client, err := mcp.Dial(context.TODO(), ":3000")
+	client, err := mcp.Dial(ctx, ":3000")
 	if err != nil {
 		slog.Error("failed to start client", "error", err)
 		return
 	}
-	slog.Info("client dialed server", "address", client.LocalAddr())
-
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt)
-	go func() {
-		<-sig
-
-		err := client.Close()
+	defer func() {
+		err = client.Close()
 		if err != nil {
 			slog.Error("failed to close client", "error", err)
 		}
-
-		err = server.Close()
-		if err != nil {
-			slog.Error("failed to close server", "error", err)
-		}
 	}()
+	slog.Info("client dialed server", "address", client.LocalAddr())
 
-	go provider(client)
+	go provider(ctx, client)
 
-	for {
-		sess, err := server.Accept(context.TODO())
+	for ctx.Err() == nil {
+		sess, err := server.Accept(ctx)
 		if errors.Is(err, mcp.ErrClosed) {
 			slog.Info("connection closed")
 			break
@@ -66,19 +55,19 @@ func main() {
 		}
 		slog.Info("session accepted", "address", sess.RemoteAddr())
 
-		go consumer(sess)
+		go consumer(ctx, sess)
 	}
 }
 
-func consumer(sess *mcp.Session) {
+func consumer(ctx context.Context, sess *mcp.Session) {
 	defer func() {
 		err := sess.Close()
 		if err != nil {
 			slog.Error("failed to close consumer (server) session", "error", err)
 		}
 	}()
-	for {
-		data, err := sess.Receive(context.TODO())
+	for ctx.Err() == nil {
+		data, err := sess.Receive(ctx)
 		if err != nil {
 			slog.Error("failed to receive data", "error", err)
 			continue
@@ -89,10 +78,10 @@ func consumer(sess *mcp.Session) {
 	}
 }
 
-func provider(sess *mcp.Session) {
+func provider(ctx context.Context, sess *mcp.Session) {
 	for i := range 10 {
 		data := []byte(fmt.Sprintf("ping %d", i))
-		err := sess.Send(context.TODO(), data)
+		err := sess.Send(ctx, data)
 		if err != nil {
 			slog.Error("failed to send data", "data", string(data), "error", err)
 		}
