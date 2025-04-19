@@ -173,10 +173,8 @@ func (ln *Listener) Accept(ctx context.Context) (*Session, error) {
 }
 
 func (ln *Listener) writeLoop() {
-	// return true means continue
-	// return false means break
-	do := func() bool {
-		ln.logger.Debug("waiting for a session")
+WRITER:
+	for {
 		// TODO: holding an exclusive lock is the bottle-neck to having
 		// multiple writers
 		ln.sessionCond.L.Lock()
@@ -184,7 +182,7 @@ func (ln *Listener) writeLoop() {
 			select {
 			case _, open := <-ln.die:
 				if !open {
-					return false
+					break WRITER
 				}
 			default:
 			}
@@ -192,7 +190,6 @@ func (ln *Listener) writeLoop() {
 		}
 		sessions := slices.Collect(maps.Values(ln.sessions))
 		ln.sessionCond.L.Unlock()
-		ln.logger.Debug("waited for a session")
 
 		outboxCases := make([]reflect.SelectCase, len(sessions)+1)
 		for i, sess := range sessions {
@@ -206,11 +203,12 @@ func (ln *Listener) writeLoop() {
 			Chan: reflect.ValueOf(ln.die),
 		}
 
-		ln.logger.Debug("holding on select")
 		chosenIdx, data, open := reflect.Select(outboxCases)
-		ln.logger.Debug("held on select")
 		if !open {
-			return chosenIdx != len(outboxCases)-1
+			if chosenIdx == len(outboxCases)-1 {
+				break
+			}
+			continue
 		}
 
 		datagram := Datagram{
@@ -221,26 +219,17 @@ func (ln *Listener) writeLoop() {
 		marshaledDatagram, err := datagram.MarshalBinary()
 		if err != nil {
 			ln.logger.Warn("failed to marshal datagram", "error", err)
-			return true
+			continue
 		}
 		_, err = ln.conn.WriteTo(marshaledDatagram, sessions[chosenIdx].raddr)
 		if errors.Is(err, net.ErrClosed) {
-			return false
+			break
 		}
 		if err != nil {
 			ln.logger.Warn("failed to write to connection",
 				"remote", sessions[chosenIdx].raddr,
 				"error", err)
-			return true
-		}
-
-		return true
-	}
-
-	for {
-		if !do() {
-			ln.logger.Debug("exited write loop")
-			break
+			continue
 		}
 	}
 }
@@ -252,7 +241,6 @@ func (ln *Listener) readLoop() {
 	for {
 		n, raddr, readErr := ln.conn.ReadFrom(buf)
 		if errors.Is(readErr, net.ErrClosed) {
-			ln.logger.Debug("exited read loop")
 			return
 		}
 
@@ -332,7 +320,7 @@ func (ln *Listener) handleDatagram(raddr net.Addr, datagram Datagram) error {
 }
 
 func (ln *Listener) Close(ctx context.Context) error {
-	ln.logger.Debug("close session called", "dial", ln.dial)
+	ln.logger.Debug("close listener called", "dial", ln.dial)
 
 	ran := false
 	ln.dieOnce.Do(func() {
@@ -340,7 +328,6 @@ func (ln *Listener) Close(ctx context.Context) error {
 		close(ln.acceptCh)
 		// notify ln.writeLoop to continue and realize ln is closed
 		ln.sessionCond.Broadcast()
-		ln.logger.Debug("notified")
 		ran = true
 	})
 	if !ran {
