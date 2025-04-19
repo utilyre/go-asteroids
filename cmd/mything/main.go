@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -28,7 +29,7 @@ func main() {
 	}()
 	slog.Info("server started", "address", server.LocalAddr())
 
-	client, err := mcp.Dial(":3000")
+	client, err := mcp.Dial(context.TODO(), ":3000")
 	if err != nil {
 		slog.Error("failed to start client", "error", err)
 		return
@@ -54,7 +55,7 @@ func main() {
 	go provider(client)
 
 	for {
-		sess, err := server.Accept()
+		sess, err := server.Accept(context.TODO())
 		if errors.Is(err, mcp.ErrClosed) {
 			slog.Info("connection closed")
 			break
@@ -77,7 +78,12 @@ func consumer(sess *mcp.Session) {
 		}
 	}()
 	for {
-		data := sess.Receive()
+		data, err := sess.Receive(context.TODO())
+		if err != nil {
+			slog.Error("failed to receive data", "error", err)
+			continue
+		}
+
 		slog.Info("received data",
 			"remote", sess.RemoteAddr(), "data", string(data))
 	}
@@ -86,7 +92,10 @@ func consumer(sess *mcp.Session) {
 func provider(sess *mcp.Session) {
 	for i := range 10 {
 		data := []byte(fmt.Sprintf("ping %d", i))
-		sess.Send(data)
+		err := sess.Send(context.TODO(), data)
+		if err != nil {
+			slog.Error("failed to send data", "data", string(data), "error", err)
+		}
 		slog.Info("sent data", "remote", sess.RemoteAddr(), "data", string(data))
 	}
 }

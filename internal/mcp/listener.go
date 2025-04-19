@@ -2,14 +2,17 @@
 package mcp
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
 	"net"
+	"os"
 	"reflect"
 	"slices"
 	"sync"
+	"time"
 )
 
 var ErrClosed = errors.New("connection closed")
@@ -65,7 +68,7 @@ func Listen(laddr string) (*Listener, error) {
 	return ln, nil
 }
 
-func Dial(raddr string) (*Session, error) {
+func Dial(ctx context.Context, raddr string) (*Session, error) {
 	ln, err := Listen("127.0.0.1:")
 	if err != nil {
 		return nil, err
@@ -75,7 +78,7 @@ func Dial(raddr string) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	sess, err := ln.join(remote)
+	sess, err := ln.join(ctx, remote)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +86,7 @@ func Dial(raddr string) (*Session, error) {
 	return sess, nil
 }
 
-func (ln *Listener) join(raddr net.Addr) (*Session, error) {
+func (ln *Listener) join(ctx context.Context, raddr net.Addr) (*Session, error) {
 	datagram := Datagram{
 		Version: version,
 		Flags:   flagJoin,
@@ -93,7 +96,8 @@ func (ln *Listener) join(raddr net.Addr) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, err = ln.conn.WriteTo(b, raddr)
+
+	_, err = writeToWithContext(ctx, ln.conn, b, raddr)
 	if err != nil {
 		return nil, err
 	}
@@ -108,12 +112,52 @@ func (ln *Listener) join(raddr net.Addr) (*Session, error) {
 	return sess, nil
 }
 
-func (ln *Listener) Accept() (*Session, error) {
-	sess, open := <-ln.acceptCh
-	if !open {
-		return nil, ErrClosed
+// please note that the context will affect all the writes happening at the
+// time of this function running.
+func writeToWithContext(ctx context.Context, conn net.PacketConn, b []byte, raddr net.Addr) (n int, err error) {
+	if deadline, ok := ctx.Deadline(); ok {
+		err := conn.SetWriteDeadline(deadline)
+		if err != nil {
+			return 0, err
+		}
 	}
-	return sess, nil
+	defer func() { // runs after local done channel is closed
+		err = errors.Join(err, conn.SetWriteDeadline(time.Time{}))
+	}()
+
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			err := conn.SetWriteDeadline(time.Now())
+			if err != nil {
+				slog.Warn("failed to set write deadline to now", "error", err)
+			}
+		}
+	}()
+
+	n, err = conn.WriteTo(b, raddr)
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return 0, ctx.Err()
+	}
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (ln *Listener) Accept(ctx context.Context) (*Session, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case sess, open := <-ln.acceptCh:
+		if !open {
+			return nil, ErrClosed
+		}
+		return sess, nil
+	}
 }
 
 func (ln *Listener) writeLoop() {
@@ -195,6 +239,8 @@ func (ln *Listener) readLoop() {
 			slog.Warn("failed to handle datagram", "error", err)
 			continue
 		}
+
+		// TODO: handle readErr
 	}
 }
 
@@ -289,12 +335,22 @@ func newSession(laddr, raddr net.Addr) *Session {
 	}
 }
 
-func (sess *Session) Receive() []byte {
-	return <-sess.inbox
+func (sess *Session) Receive(ctx context.Context) ([]byte, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case data := <-sess.inbox:
+		return data, nil
+	}
 }
 
-func (sess *Session) Send(data []byte) {
-	sess.outbox <- data
+func (sess *Session) Send(ctx context.Context, data []byte) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case sess.outbox <- data:
+		return nil
+	}
 }
 
 func (sess *Session) Close() error {
