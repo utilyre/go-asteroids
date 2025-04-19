@@ -17,8 +17,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// TODO: do not start goroutines with methods
-
 var ErrClosed = errors.New("use of closed network connection")
 
 const version byte = 1
@@ -52,7 +50,40 @@ func (ln *Listener) LocalAddr() net.Addr {
 	return ln.local
 }
 
-func Listen(laddr string) (*Listener, error) {
+type Option func(opts *options) error
+
+type options struct {
+	dial   bool
+	logger *slog.Logger
+}
+
+func WithLogger(logger *slog.Logger) Option {
+	return func(opts *options) error {
+		opts.logger = logger
+		return nil
+	}
+}
+
+func withDial(dial bool) Option {
+	return func(opts *options) error {
+		opts.dial = dial
+		return nil
+	}
+}
+
+func Listen(laddr string, opts ...Option) (*Listener, error) {
+	o := options{
+		dial:   false,
+		logger: slog.Default(),
+	}
+	var optErrs []error
+	for _, opt := range opts {
+		optErrs = append(optErrs, opt(&o))
+	}
+	if err := errors.Join(optErrs...); err != nil {
+		return nil, err
+	}
+
 	conn, err := net.ListenPacket("udp", laddr)
 	if err != nil {
 		return nil, err
@@ -60,9 +91,9 @@ func Listen(laddr string) (*Listener, error) {
 
 	// NOTE: keep fields exhaustive
 	ln := &Listener{
-		dial:        false, // TODO: make into private functional option
+		dial:        o.dial,
 		local:       conn.LocalAddr(),
-		logger:      slog.With("laddr", conn.LocalAddr()), // TODO: make slog into functional option
+		logger:      o.logger.With("laddr", conn.LocalAddr()),
 		sessions:    map[string]*Session{},
 		sessionCond: sync.Cond{L: &sync.Mutex{}},
 		acceptCh:    make(chan *Session),
@@ -75,12 +106,12 @@ func Listen(laddr string) (*Listener, error) {
 	return ln, nil
 }
 
-func Dial(ctx context.Context, raddr string) (*Session, error) {
-	ln, err := Listen("127.0.0.1:")
+func Dial(ctx context.Context, raddr string, opts ...Option) (*Session, error) {
+	opts = append(opts, withDial(true))
+	ln, err := Listen("127.0.0.1:", opts...)
 	if err != nil {
 		return nil, err
 	}
-	ln.dial = true
 
 	remote, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
