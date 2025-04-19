@@ -21,7 +21,7 @@ func main() {
 		return
 	}
 	defer func() {
-		err = server.Close()
+		err = server.Close(ctx)
 		if err != nil {
 			slog.Error("failed to close server", "error", err)
 		}
@@ -34,7 +34,7 @@ func main() {
 		return
 	}
 	defer func() {
-		err = client.Close()
+		err = client.Close(ctx)
 		if err != nil {
 			slog.Error("failed to close client", "error", err)
 		}
@@ -60,12 +60,13 @@ func main() {
 }
 
 func consumer(ctx context.Context, sess *mcp.Session) {
-	defer func() {
-		err := sess.Close()
-		if err != nil {
-			slog.Error("failed to close consumer (server) session", "error", err)
-		}
-	}()
+	// TODO: when this is uncommented, ensure everything is closed properly
+	// defer func() {
+	// 	err := sess.Close(ctx)
+	// 	if err != nil {
+	// 		slog.Error("failed to close consumer (server) session", "error", err)
+	// 	}
+	// }()
 	for ctx.Err() == nil {
 		data, err := sess.Receive(ctx)
 		if err != nil {

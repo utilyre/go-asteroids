@@ -8,6 +8,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20
 	github.com/xtaci/kcp-go/v5 v5.6.20
 	golang.org/x/crypto v0.37.0
+	golang.org/x/sync v0.8.0
 )
 
 require (
@@ -22,6 +23,5 @@ require (
 	github.com/templexxx/xorsimd v0.4.3 // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
 	golang.org/x/net v0.36.0 // indirect
-	golang.org/x/sync v0.8.0 // indirect
 	golang.org/x/sys v0.32.0 // indirect
 )

@@ -13,9 +13,14 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
-var ErrClosed = errors.New("connection closed")
+// TODO: use the terms local and remote for the public api instead of laddr and raddr
+// TODO: do not start goroutines with methods
+
+var ErrClosed = errors.New("use of closed network connection")
 
 const version byte = 1
 
@@ -31,15 +36,15 @@ const (
 // 3. sessions (multiplex incoming messages)
 
 type Listener struct {
-	laddr net.Addr
-
-	conn   net.PacketConn
+	dial   bool
+	laddr  net.Addr
 	logger *slog.Logger
 
 	sessions    map[string]*Session
 	sessionCond sync.Cond
 	acceptCh    chan *Session
 
+	conn    net.PacketConn
 	die     chan struct{}
 	dieOnce sync.Once
 }
@@ -56,12 +61,13 @@ func Listen(laddr string) (*Listener, error) {
 
 	// NOTE: keep fields exhaustive
 	ln := &Listener{
+		dial:        false, // TODO: make into private functional option
 		laddr:       conn.LocalAddr(),
-		conn:        conn,
-		logger:      slog.With("local", conn.LocalAddr()),
+		logger:      slog.With("local", conn.LocalAddr()), // TODO: make into functional option
 		sessions:    map[string]*Session{},
 		sessionCond: sync.Cond{L: &sync.Mutex{}},
 		acceptCh:    make(chan *Session),
+		conn:        conn,
 		die:         make(chan struct{}),
 		dieOnce:     sync.Once{},
 	}
@@ -75,6 +81,7 @@ func Dial(ctx context.Context, raddr string) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
+	ln.dial = true
 
 	remote, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
@@ -98,7 +105,7 @@ func Dial(ctx context.Context, raddr string) (*Session, error) {
 
 	// TODO: re-try if not acknowledged
 
-	sess := newSession(ln.laddr, remote)
+	sess := newSession(true, ln.laddr, remote, ln)
 	sess.ln = ln
 
 	ln.sessionCond.L.Lock()
@@ -213,6 +220,10 @@ func (ln *Listener) writeLoop() {
 			return true
 		}
 		_, err = ln.conn.WriteTo(marshaledDatagram, sessions[chosenIdx].raddr)
+		if errors.Is(err, net.ErrClosed) {
+			ln.logger.Debug("exited write loop, connection closed")
+			return false
+		}
 		if err != nil {
 			ln.logger.Warn("failed to write to connection",
 				"remote", sessions[chosenIdx].raddr,
@@ -275,7 +286,7 @@ func (ln *Listener) handleDatagram(raddr net.Addr, datagram Datagram) error {
 
 	switch {
 	case datagram.Flags&flagJoin != 0:
-		sess := newSession(ln.laddr, raddr)
+		sess := newSession(false, ln.laddr, raddr, ln)
 		ln.sessionCond.L.Lock()
 		if _, exists := ln.sessions[raddr.String()]; exists {
 			ln.sessionCond.L.Unlock()
@@ -316,7 +327,9 @@ func (ln *Listener) handleDatagram(raddr net.Addr, datagram Datagram) error {
 	return nil
 }
 
-func (ln *Listener) Close() error {
+func (ln *Listener) Close(ctx context.Context) error {
+	ln.logger.Debug("close session called", "dial", ln.dial)
+
 	ran := false
 	ln.dieOnce.Do(func() {
 		close(ln.die)
@@ -326,30 +339,43 @@ func (ln *Listener) Close() error {
 	if !ran {
 		return ErrClosed
 	}
-	// TODO: close all associated sessions
+
+	if !ln.dial {
+		g, ctx := errgroup.WithContext(ctx)
+		for _, sess := range ln.sessions {
+			g.Go(func() error { return sess.Close(ctx) })
+		}
+		err := g.Wait()
+		if err != nil {
+			return fmt.Errorf("close session: %w", err)
+		}
+	}
+
 	return ln.conn.Close()
 }
 
 type Session struct {
+	dial  bool
 	laddr net.Addr
 	raddr net.Addr
 
-	ln *Listener // non-nil if session created through Dial
+	inbox  chan []byte
+	outbox chan []byte
 
-	inbox   chan []byte
-	outbox  chan []byte
+	ln      *Listener
 	die     chan struct{}
 	dieOnce sync.Once
 }
 
-func newSession(laddr, raddr net.Addr) *Session {
+func newSession(dial bool, laddr, raddr net.Addr, ln *Listener) *Session {
 	// NOTE: keep fields exhaustive
 	return &Session{
+		dial:    dial,
 		laddr:   laddr,
 		raddr:   raddr,
-		ln:      nil,
-		outbox:  make(chan []byte, 1),
 		inbox:   make(chan []byte, 1),
+		outbox:  make(chan []byte, 1),
+		ln:      ln,
 		die:     make(chan struct{}),
 		dieOnce: sync.Once{},
 	}
@@ -373,7 +399,9 @@ func (sess *Session) Send(ctx context.Context, data []byte) error {
 	}
 }
 
-func (sess *Session) Close() error {
+func (sess *Session) Close(ctx context.Context) error {
+	slog.Debug("close session called", "local", sess.laddr, "dial", sess.dial)
+
 	once := false
 	sess.dieOnce.Do(func() {
 		close(sess.die)
@@ -384,12 +412,16 @@ func (sess *Session) Close() error {
 	if !once {
 		return ErrClosed
 	}
-	if sess.ln != nil {
-		err := sess.ln.Close()
+	if sess.dial {
+		err := sess.ln.Close(ctx)
 		if err != nil {
-			return err
+			return fmt.Errorf("close listener: %w", err)
 		}
 	}
+	// TODO: send datagram w/ flagLeave
+	sess.ln.sessionCond.L.Lock()
+	delete(sess.ln.sessions, sess.raddr.String())
+	sess.ln.sessionCond.L.Unlock()
 	return nil
 }
 
