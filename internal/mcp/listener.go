@@ -80,15 +80,7 @@ func Dial(ctx context.Context, raddr string) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	sess, err := ln.join(ctx, remote)
-	if err != nil {
-		return nil, err
-	}
 
-	return sess, nil
-}
-
-func (ln *Listener) join(ctx context.Context, raddr net.Addr) (*Session, error) {
 	datagram := Datagram{
 		Version: version,
 		Flags:   flagJoin,
@@ -99,18 +91,21 @@ func (ln *Listener) join(ctx context.Context, raddr net.Addr) (*Session, error) 
 		return nil, err
 	}
 
-	_, err = writeToWithContext(ctx, ln.logger, ln.conn, b, raddr)
+	_, err = writeToWithContext(ctx, ln.logger, ln.conn, b, remote)
 	if err != nil {
 		return nil, err
 	}
 
 	// TODO: re-try if not acknowledged
 
-	sess := newSession(ln.laddr, raddr)
+	sess := newSession(ln.laddr, remote)
+	sess.ln = ln
+
 	ln.sessionCond.L.Lock()
-	ln.sessions[raddr.String()] = sess
+	ln.sessions[remote.String()] = sess
 	ln.sessionCond.Broadcast()
 	ln.sessionCond.L.Unlock()
+
 	return sess, nil
 }
 
@@ -171,9 +166,14 @@ func (ln *Listener) Accept(ctx context.Context) (*Session, error) {
 }
 
 func (ln *Listener) writeLoop() {
+	// return true means continue
+	// return false means break
 	do := func() bool {
+		// ensure new sessions are not created and existing sessions are not
+		// closed
 		ln.sessionCond.L.Lock()
 		defer ln.sessionCond.L.Unlock()
+
 		for len(ln.sessions) == 0 {
 			ln.sessionCond.Wait()
 		}
@@ -195,8 +195,11 @@ func (ln *Listener) writeLoop() {
 		chosenIdx, data, open := reflect.Select(outboxCases)
 		ln.sessionCond.L.Lock() // regain the lock after the wait
 		if !open {
-			// do not continue if ln.die is closed
-			return chosenIdx != len(outboxCases)-1
+			if chosenIdx == len(outboxCases)-1 {
+				ln.logger.Debug("exited write loop")
+				return false
+			}
+			return true
 		}
 
 		datagram := Datagram{
@@ -234,6 +237,7 @@ func (ln *Listener) readLoop() {
 	for {
 		n, raddr, readErr := ln.conn.ReadFrom(buf)
 		if errors.Is(readErr, net.ErrClosed) {
+			ln.logger.Debug("exited read loop")
 			return
 		}
 
@@ -330,6 +334,8 @@ type Session struct {
 	laddr net.Addr
 	raddr net.Addr
 
+	ln *Listener // non-nil if session created through Dial
+
 	inbox   chan []byte
 	outbox  chan []byte
 	die     chan struct{}
@@ -341,6 +347,7 @@ func newSession(laddr, raddr net.Addr) *Session {
 	return &Session{
 		laddr:   laddr,
 		raddr:   raddr,
+		ln:      nil,
 		outbox:  make(chan []byte, 1),
 		inbox:   make(chan []byte, 1),
 		die:     make(chan struct{}),
@@ -376,6 +383,12 @@ func (sess *Session) Close() error {
 	})
 	if !once {
 		return ErrClosed
+	}
+	if sess.ln != nil {
+		err := sess.ln.Close()
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
