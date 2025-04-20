@@ -42,6 +42,7 @@ func startServer(ctx context.Context, laddr string) {
 		}
 		logger.Info("listener closed")
 	}()
+	logger.Info("listener started")
 
 	for ctx.Err() == nil {
 		sess, err := ln.Accept(ctx)
@@ -60,6 +61,7 @@ func startServer(ctx context.Context, laddr string) {
 				}
 				logger.Info("session closed")
 			}()
+			logger.Info("session started")
 
 			for ctx.Err() == nil {
 				data, err := sess.Receive(ctx)
@@ -105,6 +107,7 @@ func startClient(ctx context.Context, raddr string) {
 			logger.Error("failed to close session", "error", err)
 		}
 	}()
+	logger.Info("session started")
 
 	for i := range 10 {
 		data := fmt.Sprintf("ping %d", i)

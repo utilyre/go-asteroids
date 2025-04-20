@@ -37,7 +37,7 @@ type Listener struct {
 	local  net.Addr
 	logger *slog.Logger
 
-	sessions    map[string]*Session
+	sessions    map[string]*Session // maps raddr to session
 	sessionCond sync.Cond
 	acceptCh    chan *Session
 
@@ -308,6 +308,7 @@ func (ln *Listener) handleDatagram(remote net.Addr, datagram Datagram) error {
 
 	switch {
 	case datagram.Flags&flagJoin != 0:
+		ln.logger.Debug("somebody joined", "raddr", remote)
 		sess := newSession(false, ln.local, remote, ln)
 		ln.sessionCond.L.Lock()
 		if _, exists := ln.sessions[remote.String()]; exists {
@@ -316,6 +317,7 @@ func (ln *Listener) handleDatagram(remote net.Addr, datagram Datagram) error {
 		}
 		ln.sessions[remote.String()] = sess
 		ln.sessionCond.Broadcast()
+		ln.logger.Debug("new session added", "raddr", remote, "sessions", ln.sessions)
 		ln.sessionCond.L.Unlock()
 
 		// TODO: acknowledge join
@@ -325,14 +327,25 @@ func (ln *Listener) handleDatagram(remote net.Addr, datagram Datagram) error {
 		ln.sessionCond.L.Lock()
 		if _, exists := ln.sessions[remote.String()]; !exists {
 			ln.sessionCond.L.Unlock()
-			return fmt.Errorf("session %q: not found", remote)
+			return fmt.Errorf("close session %q: not found", remote)
+		}
+		sess := ln.sessions[remote.String()]
+		var err error
+		sess.dieOnce.Do(func() {
+			err = sess.partialUncheckedClose(context.TODO())
+		})
+		if err != nil {
+			ln.sessionCond.L.Unlock()
+			return fmt.Errorf("close session %q: %w", remote, err)
 		}
 		delete(ln.sessions, remote.String())
 		ln.sessionCond.L.Unlock()
+		ln.logger.Debug("yay")
 
 	default:
 		ln.sessionCond.L.Lock()
 		sess, exists := ln.sessions[remote.String()]
+		ln.logger.Debug("sessions while muxing", "sessions", ln.sessions)
 		ln.sessionCond.L.Unlock()
 		if !exists {
 			return fmt.Errorf("deliver datagram %q: session %q: not found",
@@ -350,6 +363,8 @@ func (ln *Listener) handleDatagram(remote net.Addr, datagram Datagram) error {
 }
 
 func (ln *Listener) Close(ctx context.Context) error {
+	ln.logger.Debug("close listener")
+
 	ran := false
 	ln.dieOnce.Do(func() {
 		close(ln.die)
@@ -425,28 +440,58 @@ func (sess *Session) Send(ctx context.Context, data []byte) error {
 	}
 }
 
-func (sess *Session) Close(ctx context.Context) error {
-	once := false
-	sess.dieOnce.Do(func() {
-		close(sess.die)
-		close(sess.outbox)
-		close(sess.inbox)
-		once = true
-	})
-	if !once {
-		return ErrClosed
+func (sess *Session) sendLeave(ctx context.Context) error {
+	datagram := Datagram{
+		Version: version,
+		Flags:   flagLeave,
+		Data:    nil,
 	}
+	data, err := datagram.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	_, err = writeToWithContext(ctx, sess.ln.logger, sess.ln.conn, data, sess.remote)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (sess *Session) partialUncheckedClose(ctx context.Context) error {
+	close(sess.die)
+	close(sess.outbox)
+	close(sess.inbox)
+
 	if sess.dial {
 		err := sess.ln.Close(ctx)
 		if err != nil {
 			return fmt.Errorf("close listener: %w", err)
 		}
 	}
-	// TODO: send datagram w/ flagLeave
-	sess.ln.sessionCond.L.Lock()
-	delete(sess.ln.sessions, sess.remote.String())
-	sess.ln.sessionCond.L.Unlock()
+
 	return nil
+}
+
+func (sess *Session) Close(ctx context.Context) error {
+	var err error
+	ran := false
+	sess.dieOnce.Do(func() {
+		ran = true
+
+		sess.ln.sessionCond.L.Lock()
+		delete(sess.ln.sessions, sess.remote.String())
+		sess.ln.sessionCond.L.Unlock()
+
+		var errs []error
+		errs = append(errs, sess.sendLeave(ctx))
+		errs = append(errs, sess.partialUncheckedClose(ctx))
+
+		err = errors.Join(errs...)
+	})
+	if !ran {
+		return ErrClosed
+	}
+	return err
 }
 
 func (sess *Session) LocalAddr() net.Addr {
