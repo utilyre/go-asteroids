@@ -133,7 +133,7 @@ func Dial(ctx context.Context, raddr string, opts ...Option) (*Session, error) {
 		return nil, err
 	}
 
-	// TODO: re-try if not acknowledged
+	// TODO: retry if not acknowledged
 
 	sess := newSession(true, ln.local, remote, ln)
 	sess.ln = ln
@@ -446,6 +446,7 @@ func (sess *Session) sendLeave(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// TODO: retry of not acknowledged
 	return nil
 }
 
