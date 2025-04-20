@@ -38,7 +38,7 @@ type Listener struct {
 	logger *slog.Logger
 
 	sessions    map[string]*Session // maps raddr to session
-	sessionCond sync.Cond
+	sessionCond sync.Cond           // notifies _addition_ of new sessions
 	acceptCh    chan *Session
 
 	conn    net.PacketConn
@@ -140,8 +140,8 @@ func Dial(ctx context.Context, raddr string, opts ...Option) (*Session, error) {
 
 	ln.sessionCond.L.Lock()
 	ln.sessions[remote.String()] = sess
-	ln.sessionCond.Broadcast()
 	ln.sessionCond.L.Unlock()
+	ln.sessionCond.Broadcast()
 
 	return sess, nil
 }
@@ -205,8 +205,6 @@ func (ln *Listener) Accept(ctx context.Context) (*Session, error) {
 func (ln *Listener) writeLoop() {
 WRITER:
 	for {
-		// TODO: holding an exclusive lock is the bottle-neck to having
-		// multiple writers
 		ln.sessionCond.L.Lock()
 		for len(ln.sessions) == 0 {
 			select {
@@ -315,8 +313,8 @@ func (ln *Listener) handleDatagram(remote net.Addr, datagram Datagram) error {
 			return fmt.Errorf("session %q: already exists", remote)
 		}
 		ln.sessions[remote.String()] = sess
-		ln.sessionCond.Broadcast()
 		ln.sessionCond.L.Unlock()
+		ln.sessionCond.Broadcast()
 
 		// TODO: acknowledge join
 		ln.acceptCh <- sess
