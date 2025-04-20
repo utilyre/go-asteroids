@@ -308,7 +308,6 @@ func (ln *Listener) handleDatagram(remote net.Addr, datagram Datagram) error {
 
 	switch {
 	case datagram.Flags&flagJoin != 0:
-		ln.logger.Debug("somebody joined", "raddr", remote)
 		sess := newSession(false, ln.local, remote, ln)
 		ln.sessionCond.L.Lock()
 		if _, exists := ln.sessions[remote.String()]; exists {
@@ -317,7 +316,6 @@ func (ln *Listener) handleDatagram(remote net.Addr, datagram Datagram) error {
 		}
 		ln.sessions[remote.String()] = sess
 		ln.sessionCond.Broadcast()
-		ln.logger.Debug("new session added", "raddr", remote, "sessions", ln.sessions)
 		ln.sessionCond.L.Unlock()
 
 		// TODO: acknowledge join
@@ -340,12 +338,10 @@ func (ln *Listener) handleDatagram(remote net.Addr, datagram Datagram) error {
 		}
 		delete(ln.sessions, remote.String())
 		ln.sessionCond.L.Unlock()
-		ln.logger.Debug("yay")
 
 	default:
 		ln.sessionCond.L.Lock()
 		sess, exists := ln.sessions[remote.String()]
-		ln.logger.Debug("sessions while muxing", "sessions", ln.sessions)
 		ln.sessionCond.L.Unlock()
 		if !exists {
 			return fmt.Errorf("deliver datagram %q: session %q: not found",
@@ -363,8 +359,6 @@ func (ln *Listener) handleDatagram(remote net.Addr, datagram Datagram) error {
 }
 
 func (ln *Listener) Close(ctx context.Context) error {
-	ln.logger.Debug("close listener")
-
 	ran := false
 	ln.dieOnce.Do(func() {
 		close(ln.die)
