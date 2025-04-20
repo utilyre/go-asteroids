@@ -292,17 +292,13 @@ func (ln *Listener) readLoop() {
 	}
 }
 
-func assertDatagram(datagram Datagram) {
+func (ln *Listener) handleDatagram(remote net.Addr, datagram Datagram) error {
 	if datagram.Version != version {
-		panic("mcp error: unsupported protocol version")
+		return fmt.Errorf("version %d: version is not supported", datagram.Version)
 	}
 	if datagram.Flags&flagJoin != 0 && datagram.Flags&flagLeave != 0 {
-		panic("mcp error: unknown datagram flags state")
+		return fmt.Errorf("flags %08b: unknown state", datagram.Flags)
 	}
-}
-
-func (ln *Listener) handleDatagram(remote net.Addr, datagram Datagram) error {
-	assertDatagram(datagram)
 
 	switch {
 	case datagram.Flags&flagJoin != 0:
