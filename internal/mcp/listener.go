@@ -412,6 +412,8 @@ func newSession(dial bool, local, remote net.Addr, ln *Listener) *Session {
 
 func (sess *Session) Receive(ctx context.Context) ([]byte, error) {
 	select {
+	case <-sess.die:
+		return nil, ErrClosed
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case data := <-sess.inbox:
@@ -421,6 +423,8 @@ func (sess *Session) Receive(ctx context.Context) ([]byte, error) {
 
 func (sess *Session) Send(ctx context.Context, data []byte) error {
 	select {
+	case <-sess.die:
+		return ErrClosed
 	case <-ctx.Done():
 		return ctx.Err()
 	case sess.outbox <- data:
