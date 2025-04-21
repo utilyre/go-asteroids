@@ -57,6 +57,9 @@ func TestListener_one_to_one(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 
+		// this is such a bad idea because t.Fail is sometimes called after the
+		// test is done, which causes a panic in go's toolchain. Let alone
+		// t.FailNow() that is forbidden to call in goroutines other than test.
 		logger := newAssertLogger(t.Fail)
 
 		server, err := mcp.Listen("127.0.0.1:", mcp.WithLogger(logger))
