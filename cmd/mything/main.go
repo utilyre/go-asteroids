@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	_ "multiplayer/internal/config"
 	"multiplayer/internal/mcp"
@@ -23,6 +22,7 @@ func run() {
 
 	go startServer(ctx, ":3000")
 	go startClient(ctx, ":3000")
+	go startClient(ctx, ":3000")
 
 	<-ctx.Done()
 }
@@ -30,7 +30,7 @@ func run() {
 func startServer(ctx context.Context, laddr string) {
 	logger := slog.With("type", "server", "laddr", laddr)
 
-	ln, err := mcp.Listen(":3000")
+	ln, err := mcp.Listen(":3000", mcp.WithLogger(logger))
 	if err != nil {
 		logger.Error("failed to listen", "error", err)
 		return
@@ -44,15 +44,40 @@ func startServer(ctx context.Context, laddr string) {
 	}()
 	logger.Info("listener started")
 
-	for ctx.Err() == nil {
+	go func() {
+		time.Sleep(time.Second)
+		for range 10 {
+			err := ln.Broadcast(ctx, []byte("ping"))
+			if errors.Is(err, mcp.ErrClosed) {
+				break
+			}
+			if errors.Is(err, context.Canceled) {
+				break
+			}
+			if err != nil {
+				logger.Error("failed to broadcast data")
+				continue
+			}
+		}
+	}()
+
+	for {
 		sess, err := ln.Accept(ctx)
+		if errors.Is(err, mcp.ErrClosed) {
+			break
+		}
+		if errors.Is(err, context.Canceled) {
+			break
+		}
 		if err != nil {
 			logger.Warn("failed to accept session", "error", err)
 			continue
 		}
 
+		logger.Info("session accepted", "raddr", sess.RemoteAddr())
+
 		go func() {
-			logger = logger.With("raddr", sess.RemoteAddr())
+			logger := logger.With("raddr", sess.RemoteAddr())
 			defer func() {
 				err := sess.Close(context.Background())
 				if err != nil {
@@ -63,31 +88,7 @@ func startServer(ctx context.Context, laddr string) {
 			}()
 			logger.Info("session started")
 
-			for ctx.Err() == nil {
-				data, err := sess.Receive(ctx)
-				if errors.Is(err, mcp.ErrClosed) {
-					break
-				}
-				if err != nil {
-					logger.Warn("failed to receive data", "error", err)
-					continue
-				}
-				logger.Info("data received", "data", string(data))
-
-				var idx int
-				_, err = fmt.Sscanf(string(data), "ping %d", &idx)
-				if err != nil {
-					logger.Warn("failed to scan for ping index", "error", err)
-					continue
-				}
-				data = []byte(fmt.Sprintf("pong %d", idx))
-				err = sess.Send(ctx, data)
-				if err != nil {
-					logger.Warn("failed to send back data", "data", string(data), "error", err)
-					continue
-				}
-				logger.Info("sent back data", "data", string(data))
-			}
+			<-ctx.Done()
 		}()
 	}
 }
@@ -95,7 +96,7 @@ func startServer(ctx context.Context, laddr string) {
 func startClient(ctx context.Context, raddr string) {
 	logger := slog.With("type", "client", "raddr", raddr)
 
-	sess, err := mcp.Dial(ctx, raddr)
+	sess, err := mcp.Dial(ctx, raddr, mcp.WithLogger(logger))
 	if err != nil {
 		logger.Error("failed to dial", "error", err)
 		return
@@ -109,14 +110,19 @@ func startClient(ctx context.Context, raddr string) {
 	}()
 	logger.Info("session started")
 
-	for i := range 10 {
-		data := fmt.Sprintf("ping %d", i)
-		err := sess.Send(ctx, []byte(data))
+	for {
+		data, err := sess.Receive(ctx)
+		if errors.Is(err, mcp.ErrClosed) {
+			break
+		}
+		if errors.Is(err, context.Canceled) {
+			break
+		}
 		if err != nil {
-			logger.Warn("failed to send data", "data", data, "error", err)
+			logger.Warn("failed to receive data", "error", err)
 			continue
 		}
-		logger.Info("sent data", "data", data)
+		slog.Info("received data", "data", string(data))
 	}
 	time.Sleep(time.Second) // TODO: make it that the session won't be closed until outbox is empty
 }

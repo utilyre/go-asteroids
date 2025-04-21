@@ -122,7 +122,7 @@ func Listen(laddr string, opts ...Option) (*Listener, error) {
 
 func Dial(ctx context.Context, raddr string, opts ...Option) (*Session, error) {
 	opts = append(opts, withDial(true))
-	ln, err := Listen("127.0.0.1:", opts...)
+	ln, err := Listen(":", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -214,6 +214,51 @@ func (ln *Listener) Accept(ctx context.Context) (*Session, error) {
 		}
 		return sess, nil
 	}
+}
+
+func (ln *Listener) Broadcast(ctx context.Context, data []byte) error {
+	ln.sessionCond.L.Lock()
+
+	const (
+		caseDie = 0
+		caseCtx = 1
+	)
+
+	dataVal := reflect.ValueOf(data)
+	numSessions := len(ln.sessions)
+	cases := make([]reflect.SelectCase, 2, 2+numSessions)
+	cases[caseDie] = reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(ln.die),
+	}
+	cases[caseCtx] = reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(ctx.Done()),
+	}
+	for _, sess := range ln.sessions {
+		cases = append(cases, reflect.SelectCase{
+			Dir:  reflect.SelectSend,
+			Chan: reflect.ValueOf(sess.outbox),
+			Send: dataVal,
+		})
+	}
+	ln.sessionCond.L.Unlock()
+
+	for numSent := 0; numSent < numSessions; numSent++ {
+		chosenIdx, _, open := reflect.Select(cases)
+		if !open {
+			switch chosenIdx {
+			case caseDie:
+				return ErrClosed
+			case caseCtx:
+				return ctx.Err()
+			default:
+				continue
+			}
+		}
+		cases[chosenIdx].Chan = reflect.Value{}
+	}
+	return nil
 }
 
 func (ln *Listener) writeLoop() {
