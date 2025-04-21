@@ -153,7 +153,7 @@ func Dial(ctx context.Context, raddr string, opts ...Option) (*Session, error) {
 	sess.ln = ln
 
 	ln.sessionCond.L.Lock()
-	ln.sessions[remote.String()] = sess
+	ln.sessions[remote.String()] = sess // TODO: use a unified thing instead of relying on this inconsistant address (not working)
 	ln.sessionCond.L.Unlock()
 	ln.sessionCond.Broadcast()
 
