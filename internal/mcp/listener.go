@@ -382,9 +382,7 @@ func (ln *Listener) Close(ctx context.Context) error {
 		g, ctx := errgroup.WithContext(ctx)
 		ln.sessionCond.L.Lock()
 		for _, sess := range ln.sessions {
-			ln.sessionCond.L.Unlock()
 			g.Go(func() error { return sess.Close(ctx) })
-			ln.sessionCond.L.Lock()
 		}
 		ln.sessionCond.L.Unlock()
 		err := g.Wait()
