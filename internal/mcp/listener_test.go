@@ -54,7 +54,7 @@ func TestListener_one_to_one(t *testing.T) {
 		msgPing := []byte("ping")
 		msgPong := []byte("pong")
 
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 
 		logger := newAssertLogger(t.Fail)
@@ -87,7 +87,11 @@ func TestListener_one_to_one(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			<-syn
+			select {
+			case <-syn:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 			if !bytes.Equal(msgPing, data) {
 				t.Errorf("expected data %q; actual data %q", string(msgPing), string(data))
 			}
@@ -96,7 +100,11 @@ func TestListener_one_to_one(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			syn <- struct{}{}
+			select {
+			case syn <- struct{}{}:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 
 			return nil
 		})
@@ -111,13 +119,21 @@ func TestListener_one_to_one(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			syn <- struct{}{}
+			select {
+			case syn <- struct{}{}:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 
 			data, err := client.Receive(ctx)
 			if err != nil {
 				return err
 			}
-			<-syn
+			select {
+			case <-syn:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 			if !bytes.Equal(msgPong, data) {
 				t.Errorf("expected data %q; actual data %q", string(msgPong), string(data))
 			}
