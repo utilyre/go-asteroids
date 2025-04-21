@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"multiplayer/internal/mcp"
 	"testing"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -53,7 +54,7 @@ func TestListener_one_to_one(t *testing.T) {
 		msgPing := []byte("ping")
 		msgPong := []byte("pong")
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 		defer cancel()
 
 		logger := newAssertLogger(t.Fail)
@@ -129,10 +130,10 @@ func TestListener_one_to_one(t *testing.T) {
 	})
 
 	t.Run("graceful closure", func(t *testing.T) {
-		panic("TODO")
+		t.Fatal("TODO")
 	})
 
 	t.Run("abuse of closure", func(t *testing.T) {
-		panic("TODO")
+		t.Fatal("TODO")
 	})
 }
