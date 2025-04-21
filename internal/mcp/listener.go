@@ -17,7 +17,10 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-var ErrClosed = errors.New("use of closed network connection")
+var (
+	ErrClosed       = errors.New("use of closed network connection")
+	ErrNegativeSize = errors.New("provision of negative value as size")
+)
 
 const version byte = 1
 
@@ -33,9 +36,8 @@ const (
 // 3. sessions (multiplex incoming messages)
 
 type Listener struct {
-	dial   bool
-	local  net.Addr
-	logger *slog.Logger
+	options
+	local net.Addr
 
 	sessions    map[string]*Session // maps raddr to session
 	sessionCond sync.Cond           // notifies _addition_ of new sessions
@@ -53,8 +55,20 @@ func (ln *Listener) LocalAddr() net.Addr {
 type Option func(opts *options) error
 
 type options struct {
-	dial   bool
-	logger *slog.Logger
+	dial    bool
+	capData int
+	logger  *slog.Logger
+}
+
+func WithCapData(cap int) Option {
+	return func(opts *options) error {
+		if cap < 0 {
+			return ErrNegativeSize
+		}
+
+		opts.capData = cap
+		return nil
+	}
 }
 
 func WithLogger(logger *slog.Logger) Option {
@@ -73,8 +87,9 @@ func withDial(dial bool) Option {
 
 func Listen(laddr string, opts ...Option) (*Listener, error) {
 	o := options{
-		dial:   false,
-		logger: slog.Default(),
+		dial:    false,
+		capData: 1024,
+		logger:  slog.Default(),
 	}
 	var optErrs []error
 	for _, opt := range opts {
@@ -91,9 +106,8 @@ func Listen(laddr string, opts ...Option) (*Listener, error) {
 
 	// NOTE: keep fields exhaustive
 	ln := &Listener{
-		dial:        o.dial,
+		options:     o,
 		local:       conn.LocalAddr(),
-		logger:      o.logger.With("laddr", conn.LocalAddr()),
 		sessions:    map[string]*Session{},
 		sessionCond: sync.Cond{L: &sync.Mutex{}},
 		acceptCh:    make(chan *Session),
@@ -263,9 +277,7 @@ WRITER:
 }
 
 func (ln *Listener) readLoop() {
-	const bufSize = 1024
-
-	buf := make([]byte, bufSize)
+	buf := make([]byte, headerSize+ln.capData)
 	for {
 		n, remote, readErr := ln.conn.ReadFrom(buf)
 		if errors.Is(readErr, net.ErrClosed) {
