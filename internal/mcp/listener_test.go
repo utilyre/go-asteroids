@@ -153,6 +153,82 @@ func TestListener_one_to_one(t *testing.T) {
 	})
 
 	t.Run("abuse of closure", func(t *testing.T) {
-		t.Fatal("TODO")
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+
+		ln, err := mcp.Listen("127.0.0.1:")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		err = ln.Close(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = ln.Close(ctx)
+		if !errors.Is(err, mcp.ErrClosed) {
+			t.Fatal(err)
+		}
+		err = ln.Close(ctx)
+		if !errors.Is(err, mcp.ErrClosed) {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("abuse of closure with clients", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+
+		server, err := mcp.Listen("127.0.0.1:")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		spawnClient := func() error {
+			client, err := mcp.Dial(ctx, server.LocalAddr().String())
+			if err != nil {
+				return err
+			}
+			err = client.Close(ctx)
+			if err != nil {
+				return err
+			}
+			err = client.Close(ctx)
+			if !errors.Is(err, mcp.ErrClosed) {
+				return err
+			}
+			err = client.Close(ctx)
+			if !errors.Is(err, mcp.ErrClosed) {
+				return err
+			}
+			return nil
+		}
+		acceptClient := func() error {
+			sess, err := server.Accept(ctx)
+			if err != nil {
+				return err
+			}
+			err = sess.Close(ctx)
+			if err != nil {
+				return err
+			}
+			err = sess.Close(ctx)
+			if err != nil {
+				return err
+			}
+			err = sess.Close(ctx)
+			if err != nil {
+				return err
+			}
+			return nil
+		}
+		g, ctx := errgroup.WithContext(ctx)
+		g.Go(spawnClient)
+		g.Go(spawnClient)
+		g.Go(acceptClient)
+		g.Go(acceptClient)
+		if err := g.Wait(); err != nil {
+			t.Fatal(err)
+		}
 	})
 }
