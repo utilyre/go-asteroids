@@ -89,7 +89,7 @@ func Listen(laddr string, opts ...Option) (*Listener, error) {
 	o := options{
 		dial:    false,
 		capData: 1024,
-		logger:  slog.Default(),
+		logger:  slog.New(slog.DiscardHandler),
 	}
 	var optErrs []error
 	for _, opt := range opts {
