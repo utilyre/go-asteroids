@@ -302,6 +302,8 @@ func (ln *Listener) handleDatagram(remote net.Addr, datagram Datagram) error {
 
 	switch {
 	case datagram.Flags&flagJoin != 0:
+		// TODO: acknowledge join
+
 		sess := newSession(false, ln.local, remote, ln)
 		ln.sessionCond.L.Lock()
 		if _, exists := ln.sessions[remote.String()]; exists {
@@ -312,7 +314,6 @@ func (ln *Listener) handleDatagram(remote net.Addr, datagram Datagram) error {
 		ln.sessionCond.L.Unlock()
 		ln.sessionCond.Broadcast()
 
-		// TODO: acknowledge join
 		ln.acceptCh <- sess
 
 	case datagram.Flags&flagLeave != 0:
