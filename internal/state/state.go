@@ -10,7 +10,7 @@ type Input struct {
 }
 
 // A zero valued input does not manipulate the state.
-func (s *State) Update(delta time.Duration, who int, input Input) {
+func (s *State) Update(delta time.Duration, input Input) {
 	const houseAccel = 300
 	dt := delta.Seconds()
 
@@ -28,21 +28,13 @@ func (s *State) Update(delta time.Duration, who int, input Input) {
 		v.X += 1
 	}
 
-	switch who {
-	case 1:
-		s.House1.Accel = v.Normalize().Mul(houseAccel)
-		s.House1.Trans = s.House1.Accel.Mul(0.5 * dt * dt).Add(s.House1.Vel.Mul(dt)).Add(s.House1.Trans)
-		s.House1.Vel = s.House1.Accel.Mul(dt).Add(s.House1.Vel)
-	case 2:
-		s.House2.Accel = v.Normalize().Mul(houseAccel)
-		s.House2.Trans = s.House2.Accel.Mul(0.5 * dt * dt).Add(s.House2.Vel.Mul(dt)).Add(s.House2.Trans)
-		s.House2.Vel = s.House2.Accel.Mul(dt).Add(s.House2.Vel)
-	}
+	s.House.Accel = v.Normalize().Mul(houseAccel)
+	s.House.Trans = s.House.Accel.Mul(0.5 * dt * dt).Add(s.House.Vel.Mul(dt)).Add(s.House.Trans)
+	s.House.Vel = s.House.Accel.Mul(dt).Add(s.House.Vel)
 }
 
 type State struct {
-	House1 House
-	House2 House
+	House House
 }
 
 type House struct {

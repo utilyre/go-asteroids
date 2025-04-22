@@ -1,21 +1,19 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"image"
 	_ "image/png"
+	"multiplayer/internal/cli"
 	_ "multiplayer/internal/config"
 	"multiplayer/internal/simulation"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
 func main() {
-	ctx, cancel := newSignalContext()
+	ctx, cancel := cli.NewSignalContext()
 	defer cancel()
 
 	ebiten.SetWindowTitle("Multiplayer - Simulation")
@@ -35,35 +33,6 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-}
-
-func newSignalContext() (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	quitCh := make(chan os.Signal, 1)
-	signal.Notify(
-		quitCh,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		syscall.SIGHUP,
-		syscall.SIGQUIT,
-		syscall.SIGPIPE,
-	)
-
-	go func() {
-		wasSIGINT := false
-
-		for sig := range quitCh {
-			if wasSIGINT && sig == syscall.SIGINT {
-				os.Exit(1)
-			}
-
-			wasSIGINT = sig == syscall.SIGINT
-			cancel()
-		}
-	}()
-
-	return ctx, cancel
 }
 
 func openImage(name string) (img image.Image, err error) {
