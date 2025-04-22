@@ -1,0 +1,552 @@
+// Package mcp stands for my custom protocol.
+package mcp
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"maps"
+	"net"
+	"os"
+	"reflect"
+	"slices"
+	"sync"
+	"time"
+
+	"golang.org/x/sync/errgroup"
+)
+
+var (
+	ErrClosed       = errors.New("use of closed network connection")
+	ErrNegativeSize = errors.New("provision of negative value as size")
+)
+
+const version byte = 1
+
+const (
+	flagJoin uint16 = 1 << iota
+	flagLeave
+)
+
+// how is this any different from net.PacketConn?
+//
+// 1. broadcast (channels)
+// 2. ack via checksum
+// 3. sessions (multiplex incoming messages)
+
+type Listener struct {
+	options
+	local net.Addr
+
+	sessions    map[string]*Session // maps raddr to session
+	sessionCond sync.Cond           // notifies _addition_ of new sessions
+	acceptCh    chan *Session
+
+	conn    net.PacketConn
+	die     chan struct{}
+	dieOnce sync.Once
+}
+
+func (ln *Listener) LocalAddr() net.Addr {
+	return ln.local
+}
+
+type Option func(opts *options) error
+
+type options struct {
+	dial     bool
+	dataSize int
+	logger   *slog.Logger
+}
+
+func WithDataSize(dataSize int) Option {
+	return func(opts *options) error {
+		if dataSize < 0 {
+			return ErrNegativeSize
+		}
+
+		opts.dataSize = dataSize
+		return nil
+	}
+}
+
+func WithLogger(logger *slog.Logger) Option {
+	return func(opts *options) error {
+		opts.logger = logger
+		return nil
+	}
+}
+
+func withDial(dial bool) Option {
+	return func(opts *options) error {
+		opts.dial = dial
+		return nil
+	}
+}
+
+func Listen(laddr string, opts ...Option) (*Listener, error) {
+	o := options{
+		dial:     false,
+		dataSize: 512 - headerSize, // avoid fragmentation
+		logger:   slog.New(slog.DiscardHandler),
+	}
+	var optErrs []error
+	for _, opt := range opts {
+		optErrs = append(optErrs, opt(&o))
+	}
+	if err := errors.Join(optErrs...); err != nil {
+		return nil, err
+	}
+
+	conn, err := net.ListenPacket("udp", laddr)
+	if err != nil {
+		return nil, err
+	}
+
+	// NOTE: keep fields exhaustive
+	ln := &Listener{
+		options:     o,
+		local:       conn.LocalAddr(),
+		sessions:    map[string]*Session{},
+		sessionCond: sync.Cond{L: &sync.Mutex{}},
+		acceptCh:    make(chan *Session),
+		conn:        conn,
+		die:         make(chan struct{}),
+		dieOnce:     sync.Once{},
+	}
+	go ln.readLoop()
+	go ln.writeLoop()
+	return ln, nil
+}
+
+func Dial(ctx context.Context, raddr string, opts ...Option) (*Session, error) {
+	opts = append(opts, withDial(true))
+	ln, err := Listen(":", opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	remote, err := net.ResolveUDPAddr("udp", raddr)
+	if err != nil {
+		return nil, err
+	}
+
+	datagram := Datagram{
+		Version: version,
+		Flags:   flagJoin,
+		Data:    nil,
+	}
+	b, err := datagram.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = writeToWithContext(ctx, ln.logger, ln.conn, b, remote)
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO: retry if not acknowledged
+
+	sess := newSession(true, ln.local, remote, ln)
+	sess.ln = ln
+
+	ln.sessionCond.L.Lock()
+	ln.sessions[remote.String()] = sess
+	ln.sessionCond.L.Unlock()
+	ln.sessionCond.Broadcast()
+
+	return sess, nil
+}
+
+// please note that the context will affect all the writes happening at the
+// time of this function running.
+func writeToWithContext(
+	ctx context.Context,
+	logger *slog.Logger,
+	conn net.PacketConn,
+	b []byte,
+	remote net.Addr,
+) (n int, err error) {
+	if deadline, ok := ctx.Deadline(); ok {
+		err := conn.SetWriteDeadline(deadline)
+		if err != nil {
+			return 0, err
+		}
+	}
+	defer func() { // runs after local done channel is closed
+		err = errors.Join(err, conn.SetWriteDeadline(time.Time{}))
+	}()
+
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			err := conn.SetWriteDeadline(time.Now())
+			if err != nil {
+				logger.WarnContext(ctx, "failed to cancel write",
+					"raddr", remote,
+					"error", err)
+			}
+		}
+	}()
+
+	n, err = conn.WriteTo(b, remote)
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return 0, ctx.Err()
+	}
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (ln *Listener) Accept(ctx context.Context) (*Session, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case sess, open := <-ln.acceptCh:
+		if !open {
+			return nil, ErrClosed
+		}
+		return sess, nil
+	}
+}
+
+func (ln *Listener) Broadcast(ctx context.Context, data []byte) error {
+	ln.sessionCond.L.Lock()
+
+	const (
+		caseDie = 0
+		caseCtx = 1
+	)
+
+	dataVal := reflect.ValueOf(data)
+	numSessions := len(ln.sessions)
+	cases := make([]reflect.SelectCase, 2, 2+numSessions)
+	cases[caseDie] = reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(ln.die),
+	}
+	cases[caseCtx] = reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(ctx.Done()),
+	}
+	for _, sess := range ln.sessions {
+		cases = append(cases, reflect.SelectCase{
+			Dir:  reflect.SelectSend,
+			Chan: reflect.ValueOf(sess.outbox),
+			Send: dataVal,
+		})
+	}
+	ln.sessionCond.L.Unlock()
+
+	for numSent := 0; numSent < numSessions; numSent++ {
+		chosenIdx, _, open := reflect.Select(cases)
+		if !open {
+			switch chosenIdx {
+			case caseDie:
+				return ErrClosed
+			case caseCtx:
+				return ctx.Err()
+			default:
+				continue
+			}
+		}
+		cases[chosenIdx].Chan = reflect.Value{}
+	}
+	return nil
+}
+
+func (ln *Listener) writeLoop() {
+WRITER:
+	for {
+		ln.sessionCond.L.Lock()
+		for len(ln.sessions) == 0 {
+			select {
+			case _, open := <-ln.die:
+				if !open {
+					break WRITER
+				}
+			default:
+			}
+			ln.sessionCond.Wait()
+		}
+		sessions := slices.Collect(maps.Values(ln.sessions))
+		ln.sessionCond.L.Unlock()
+
+		outboxCases := make([]reflect.SelectCase, len(sessions)+1)
+		for i, sess := range sessions {
+			outboxCases[i] = reflect.SelectCase{
+				Dir:  reflect.SelectRecv,
+				Chan: reflect.ValueOf(sess.outbox),
+			}
+		}
+		outboxCases[len(outboxCases)-1] = reflect.SelectCase{
+			Dir:  reflect.SelectRecv,
+			Chan: reflect.ValueOf(ln.die),
+		}
+
+		chosenIdx, data, open := reflect.Select(outboxCases)
+		if !open {
+			if chosenIdx == len(outboxCases)-1 {
+				break
+			}
+			continue
+		}
+
+		datagram := Datagram{
+			Version: version,
+			Flags:   0,
+			Data:    data.Bytes(),
+		}
+		marshaledDatagram, err := datagram.MarshalBinary()
+		if err != nil {
+			ln.logger.Warn("failed to marshal datagram", "error", err)
+			continue
+		}
+		_, err = ln.conn.WriteTo(marshaledDatagram, sessions[chosenIdx].remote)
+		if errors.Is(err, net.ErrClosed) {
+			break
+		}
+		if err != nil {
+			ln.logger.Warn("failed to write to connection",
+				"raddr", sessions[chosenIdx].remote,
+				"error", err)
+			continue
+		}
+	}
+}
+
+func (ln *Listener) readLoop() {
+	buf := make([]byte, headerSize+ln.dataSize)
+	for {
+		n, remote, readErr := ln.conn.ReadFrom(buf)
+		if errors.Is(readErr, net.ErrClosed) {
+			return
+		}
+
+		var datagram Datagram
+		err := datagram.UnmarshalBinary(buf[:n])
+		if err != nil {
+			ln.logger.Warn("failed to unmarshal datagram", "error", err)
+			continue
+		}
+
+		err = ln.handleDatagram(remote, datagram)
+		if err != nil {
+			ln.logger.Warn("failed to handle datagram", "error", err)
+			continue
+		}
+
+		if readErr != nil {
+			ln.logger.Warn("failed to read from connection", "error", err)
+			continue
+		}
+	}
+}
+
+func (ln *Listener) handleDatagram(remote net.Addr, datagram Datagram) error {
+	if datagram.Version != version {
+		return fmt.Errorf("version %d: version is not supported", datagram.Version)
+	}
+	if datagram.Flags&flagJoin != 0 && datagram.Flags&flagLeave != 0 {
+		return fmt.Errorf("flags %08b: unknown state", datagram.Flags)
+	}
+
+	switch {
+	case datagram.Flags&flagJoin != 0:
+		// TODO: acknowledge join
+
+		sess := newSession(false, ln.local, remote, ln)
+		ln.sessionCond.L.Lock()
+		if _, exists := ln.sessions[remote.String()]; exists {
+			ln.sessionCond.L.Unlock()
+			return fmt.Errorf("session %q: already exists", remote)
+		}
+		ln.sessions[remote.String()] = sess
+		ln.sessionCond.L.Unlock()
+		ln.sessionCond.Broadcast()
+
+		ln.acceptCh <- sess
+
+	case datagram.Flags&flagLeave != 0:
+		ln.sessionCond.L.Lock()
+		if _, exists := ln.sessions[remote.String()]; !exists {
+			ln.sessionCond.L.Unlock()
+			return fmt.Errorf("close session %q: not found", remote)
+		}
+		sess := ln.sessions[remote.String()]
+		var err error
+		sess.dieOnce.Do(func() {
+			err = sess.partialUncheckedClose(context.TODO())
+		})
+		if err != nil {
+			ln.sessionCond.L.Unlock()
+			return fmt.Errorf("close session %q: %w", remote, err)
+		}
+		delete(ln.sessions, remote.String())
+		ln.sessionCond.L.Unlock()
+
+	default:
+		ln.sessionCond.L.Lock()
+		sess, exists := ln.sessions[remote.String()]
+		ln.sessionCond.L.Unlock()
+		if !exists {
+			return fmt.Errorf("deliver datagram %q: session %q: not found",
+				datagram, remote)
+		}
+
+		// try to deliver the data
+		select {
+		case sess.inbox <- datagram.Data:
+		default:
+		}
+	}
+
+	return nil
+}
+
+func (ln *Listener) Close(ctx context.Context) error {
+	ran := false
+	ln.dieOnce.Do(func() {
+		close(ln.die)
+		close(ln.acceptCh)
+		// notify ln.writeLoop to continue and realize ln is closed
+		ln.sessionCond.Broadcast()
+		ran = true
+	})
+	if !ran {
+		return ErrClosed
+	}
+
+	if !ln.dial {
+		g, ctx := errgroup.WithContext(ctx)
+		ln.sessionCond.L.Lock()
+		for _, sess := range ln.sessions {
+			g.Go(func() error { return sess.Close(ctx) })
+		}
+		ln.sessionCond.L.Unlock()
+		err := g.Wait()
+		if err != nil {
+			return fmt.Errorf("close session: %w", err)
+		}
+	}
+
+	return ln.conn.Close()
+}
+
+type Session struct {
+	dial   bool
+	local  net.Addr
+	remote net.Addr
+
+	inbox  chan []byte
+	outbox chan []byte
+
+	ln      *Listener
+	die     chan struct{}
+	dieOnce sync.Once
+}
+
+func newSession(dial bool, local, remote net.Addr, ln *Listener) *Session {
+	// NOTE: keep fields exhaustive
+	return &Session{
+		dial:    dial,
+		local:   local,
+		remote:  remote,
+		inbox:   make(chan []byte, 1),
+		outbox:  make(chan []byte, 1),
+		ln:      ln,
+		die:     make(chan struct{}),
+		dieOnce: sync.Once{},
+	}
+}
+
+func (sess *Session) Receive(ctx context.Context) ([]byte, error) {
+	select {
+	case <-sess.die:
+		return nil, ErrClosed
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case data := <-sess.inbox:
+		return data, nil
+	}
+}
+
+func (sess *Session) Send(ctx context.Context, data []byte) error {
+	select {
+	case <-sess.die:
+		return ErrClosed
+	case <-ctx.Done():
+		return ctx.Err()
+	case sess.outbox <- data:
+		return nil
+	}
+}
+
+func (sess *Session) sendLeave(ctx context.Context) error {
+	datagram := Datagram{
+		Version: version,
+		Flags:   flagLeave,
+		Data:    nil,
+	}
+	data, err := datagram.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	_, err = writeToWithContext(ctx, sess.ln.logger, sess.ln.conn, data, sess.remote)
+	if err != nil {
+		return err
+	}
+	// TODO: retry of not acknowledged
+	return nil
+}
+
+func (sess *Session) partialUncheckedClose(ctx context.Context) error {
+	close(sess.die)
+	close(sess.outbox)
+	close(sess.inbox)
+
+	if sess.dial {
+		err := sess.ln.Close(ctx)
+		if err != nil {
+			return fmt.Errorf("close listener: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (sess *Session) Close(ctx context.Context) error {
+	var err error
+	ran := false
+	sess.dieOnce.Do(func() {
+		ran = true
+
+		sess.ln.sessionCond.L.Lock()
+		delete(sess.ln.sessions, sess.remote.String())
+		sess.ln.sessionCond.L.Unlock()
+
+		var errs []error
+		errs = append(errs, sess.sendLeave(ctx))
+		errs = append(errs, sess.partialUncheckedClose(ctx))
+
+		err = errors.Join(errs...)
+	})
+	if !ran {
+		return ErrClosed
+	}
+	return err
+}
+
+func (sess *Session) LocalAddr() net.Addr {
+	return sess.local
+}
+
+func (sess *Session) RemoteAddr() net.Addr {
+	return sess.remote
+}
