@@ -20,9 +20,9 @@ func run() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	go startServer(ctx, ":3000")
-	go startClient(ctx, ":3000")
-	go startClient(ctx, ":3000")
+	go startServer(ctx, "127.0.0.1:3000")
+	go startClient(ctx, "127.0.0.1:3000")
+	go startClient(ctx, "127.0.0.1:3000")
 
 	<-ctx.Done()
 }
@@ -30,7 +30,7 @@ func run() {
 func startServer(ctx context.Context, laddr string) {
 	logger := slog.With("type", "server", "laddr", laddr)
 
-	ln, err := mcp.Listen(":3000", mcp.WithLogger(logger))
+	ln, err := mcp.Listen(laddr, mcp.WithLogger(logger))
 	if err != nil {
 		logger.Error("failed to listen", "error", err)
 		return
