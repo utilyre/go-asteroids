@@ -55,18 +55,18 @@ func (ln *Listener) LocalAddr() net.Addr {
 type Option func(opts *options) error
 
 type options struct {
-	dial    bool
-	capData int
-	logger  *slog.Logger
+	dial     bool
+	dataSize int
+	logger   *slog.Logger
 }
 
-func WithCapData(cap int) Option {
+func WithDataSize(dataSize int) Option {
 	return func(opts *options) error {
-		if cap < 0 {
+		if dataSize < 0 {
 			return ErrNegativeSize
 		}
 
-		opts.capData = cap
+		opts.dataSize = dataSize
 		return nil
 	}
 }
@@ -87,9 +87,9 @@ func withDial(dial bool) Option {
 
 func Listen(laddr string, opts ...Option) (*Listener, error) {
 	o := options{
-		dial:    false,
-		capData: 1024,
-		logger:  slog.New(slog.DiscardHandler),
+		dial:     false,
+		dataSize: 512 - headerSize, // avoid fragmentation
+		logger:   slog.New(slog.DiscardHandler),
 	}
 	var optErrs []error
 	for _, opt := range opts {
@@ -322,7 +322,7 @@ WRITER:
 }
 
 func (ln *Listener) readLoop() {
-	buf := make([]byte, headerSize+ln.capData)
+	buf := make([]byte, headerSize+ln.dataSize)
 	for {
 		n, remote, readErr := ln.conn.ReadFrom(buf)
 		if errors.Is(readErr, net.ErrClosed) {
