@@ -1,12 +1,10 @@
 package main
 
 import (
-	"context"
 	"log/slog"
 	"multiplayer/internal/cli"
 	_ "multiplayer/internal/config"
 	"multiplayer/internal/game"
-	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
@@ -21,22 +19,16 @@ func main() {
 		return
 	}
 	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
 		err = g.Close(ctx)
 		if err != nil {
 			slog.Error("failed to close game", "error", err)
 		}
 	}()
-	go func() {
-		<-ctx.Done()
-		g.Stop()
-	}()
 
 	ebiten.SetWindowTitle("Multiplayer")
 	err = ebiten.RunGame(g)
 	if err != nil {
-		slog.Error("failed to run game", "error", err)
+		slog.Error("failed to run game as an ebiten game", "error", err)
 		return
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"image"
 	_ "image/png"
+	"log/slog"
 	"multiplayer/internal/mcp"
 	"multiplayer/internal/state"
 	"os"
@@ -22,7 +23,6 @@ type Game struct {
 	houseImg *ebiten.Image
 	sess     *mcp.Session
 	state    state.State
-	quit     bool
 }
 
 func New(ctx context.Context, raddr string) (*Game, error) {
@@ -31,7 +31,7 @@ func New(ctx context.Context, raddr string) (*Game, error) {
 		return nil, err
 	}
 
-	sess, err := mcp.Dial(ctx, raddr)
+	sess, err := mcp.Dial(ctx, raddr, mcp.WithLogger(slog.Default()))
 	if err != nil {
 		return nil, err
 	}
@@ -40,17 +40,11 @@ func New(ctx context.Context, raddr string) (*Game, error) {
 		houseImg: ebiten.NewImageFromImage(houseImg),
 		sess:     sess,
 		state:    state.State{},
-		quit:     false,
 	}, nil
 }
 
 func (g *Game) Close(ctx context.Context) error {
-	g.Stop()
 	return g.sess.Close(ctx)
-}
-
-func (g *Game) Stop() {
-	g.quit = true
 }
 
 func (g *Game) Layout(int, int) (int, int) {
@@ -67,15 +61,31 @@ func (g *Game) Draw(screen *ebiten.Image) {
 }
 
 func (g *Game) Update() error {
-	if g.quit {
-		return ebiten.Termination
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), deltaTickTime)
+	defer cancel()
 
 	input := state.Input{
 		Left:  ebiten.IsKeyPressed(ebiten.KeyH),
 		Down:  ebiten.IsKeyPressed(ebiten.KeyJ),
 		Up:    ebiten.IsKeyPressed(ebiten.KeyK),
 		Right: ebiten.IsKeyPressed(ebiten.KeyL),
+	}
+
+	data, err := input.MarshalBinary()
+	if err != nil {
+		slog.Warn("failed to marshal input", "error", err)
+		return nil
+	}
+	err = g.sess.Send(ctx, data)
+	if errors.Is(err, mcp.ErrClosed) {
+		return ebiten.Termination
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return nil
+	}
+	if err != nil {
+		slog.Warn("failed to send input", "error", err)
+		return nil
 	}
 
 	g.state.Update(deltaTickTime, input)

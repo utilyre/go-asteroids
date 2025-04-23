@@ -1,13 +1,11 @@
 package main
 
 import (
-	"errors"
-	"image"
 	_ "image/png"
+	"log/slog"
 	"multiplayer/internal/cli"
 	_ "multiplayer/internal/config"
 	"multiplayer/internal/simulation"
-	"os"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
@@ -16,36 +14,22 @@ func main() {
 	ctx, cancel := cli.NewSignalContext()
 	defer cancel()
 
-	ebiten.SetWindowTitle("Multiplayer - Simulation")
-	ebiten.SetWindowSize(640, 480)
-	ebiten.SetWindowClosingHandled(true)
-
-	// listener
-
-	houseImg, err := openImage("./assets/house.png")
+	sim, err := simulation.New(ctx, "127.0.0.1:3000")
 	if err != nil {
-		panic(err)
+		slog.Error("failed to instantiate simulation", "error", err)
+		return
 	}
+	defer func() {
+		err = sim.Close(ctx)
+		if err != nil {
+			slog.Error("failed to close simulation", "error", err)
+		}
+	}()
 
-	// simulation loop
-	sim := simulation.New(ctx.Done(), houseImg)
+	ebiten.SetWindowTitle("Multiplayer - Simulation")
 	err = ebiten.RunGame(sim)
 	if err != nil {
-		panic(err)
+		slog.Error("failed to run simulation as an ebiten game", "error", err)
+		return
 	}
-}
-
-func openImage(name string) (img image.Image, err error) {
-	f, err := os.Open(name)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { err = errors.Join(err, f.Close()) }()
-
-	img, _, err = image.Decode(f)
-	if err != nil {
-		return nil, err
-	}
-
-	return img, nil
 }

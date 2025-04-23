@@ -1,8 +1,13 @@
 package simulation
 
 import (
+	"context"
+	"errors"
 	"image"
+	"log/slog"
+	"multiplayer/internal/mcp"
 	"multiplayer/internal/state"
+	"os"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -14,52 +19,49 @@ const (
 )
 
 type Simulation struct {
-	done     <-chan struct{}
 	houseImg *ebiten.Image
-
-	// TODO: generalize to multiplayer
-	inputBuffer <-chan state.Input
-
-	state state.State
+	sess     *mcp.Session
+	state    state.State
 }
 
-func New(done <-chan struct{}, houseImg image.Image) *Simulation {
-	// bufferred channel for testing
-	// TODO: should be a battle tested jitter buffer
-	ch := make(chan state.Input, 1)
-	// this "mocks" inputs coming in from a single client
-	go func() {
-		defer close(ch)
+func New(ctx context.Context, laddr string) (*Simulation, error) {
+	houseImg, err := openImage("./assets/house.png")
+	if err != nil {
+		return nil, err
+	}
 
-		t := time.NewTicker(deltaTickTime)
-		defer t.Stop()
-
-		for {
-			select {
-			case <-done:
-				return
-			case <-t.C:
-			}
-
-			input := state.Input{
-				Left:  ebiten.IsKeyPressed(ebiten.KeyH),
-				Down:  ebiten.IsKeyPressed(ebiten.KeyJ),
-				Up:    ebiten.IsKeyPressed(ebiten.KeyK),
-				Right: ebiten.IsKeyPressed(ebiten.KeyL),
-			}
-
-			select {
-			case ch <- input:
-			default:
-			}
-		}
-	}()
+	ln, err := mcp.Listen(laddr, mcp.WithLogger(slog.Default()))
+	if err != nil {
+		return nil, err
+	}
+	sess, err := ln.Accept(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	return &Simulation{
-		done:        done,
-		houseImg:    ebiten.NewImageFromImage(houseImg),
-		inputBuffer: ch,
+		houseImg: ebiten.NewImageFromImage(houseImg),
+		sess:     sess,
+		state:    state.State{},
+	}, nil
+}
+
+func openImage(name string) (img image.Image, err error) {
+	f, err := os.Open(name)
+	if err != nil {
+		return nil, err
 	}
+	defer func() { err = errors.Join(err, f.Close()) }()
+
+	img, _, err = image.Decode(f)
+	if err != nil {
+		return nil, err
+	}
+
+	return img, nil
+}
+func (sim *Simulation) Close(ctx context.Context) error {
+	return sim.sess.Close(ctx)
 }
 
 func (sim *Simulation) Layout(int, int) (int, int) {
@@ -76,20 +78,29 @@ func (sim *Simulation) Draw(screen *ebiten.Image) {
 }
 
 func (sim *Simulation) Update() error {
-	select {
-	case <-sim.done:
-		return ebiten.Termination
-	default:
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), deltaTickTime)
+	defer cancel()
 
 	// try to read input of each player
 	// if no input for any player then they dont get to play on this frame
 	// PERF: use reflect.Select to process the earliest, earlier
 
+	data, err := sim.sess.Receive(ctx)
+	if errors.Is(err, mcp.ErrClosed) {
+		return ebiten.Termination
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return nil
+	}
+	if err != nil {
+		slog.Warn("failed to receive input", "error", err)
+		return nil
+	}
 	var input state.Input
-	select {
-	case input = <-sim.inputBuffer:
-	default:
+	err = input.UnmarshalBinary(data)
+	if err != nil {
+		slog.Warn("failed to unmarshal input", "error", err)
+		return nil
 	}
 
 	sim.state.Update(deltaTickTime, input)
