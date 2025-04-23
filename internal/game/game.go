@@ -22,6 +22,7 @@ type Game struct {
 	houseImg *ebiten.Image
 	sess     *mcp.Session
 	state    state.State
+	quit     bool
 }
 
 func New(ctx context.Context, raddr string) (*Game, error) {
@@ -39,11 +40,17 @@ func New(ctx context.Context, raddr string) (*Game, error) {
 		houseImg: ebiten.NewImageFromImage(houseImg),
 		sess:     sess,
 		state:    state.State{},
+		quit:     false,
 	}, nil
 }
 
 func (g *Game) Close(ctx context.Context) error {
+	g.Stop()
 	return g.sess.Close(ctx)
+}
+
+func (g *Game) Stop() {
+	g.quit = true
 }
 
 func (g *Game) Layout(int, int) (int, int) {
@@ -60,6 +67,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 }
 
 func (g *Game) Update() error {
+	if g.quit {
+		return ebiten.Termination
+	}
+
 	input := state.Input{
 		Left:  ebiten.IsKeyPressed(ebiten.KeyH),
 		Down:  ebiten.IsKeyPressed(ebiten.KeyJ),
