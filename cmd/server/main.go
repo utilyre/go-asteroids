@@ -27,6 +27,7 @@ func main() {
 	}()
 
 	ebiten.SetWindowTitle("Multiplayer - Simulation")
+	ebiten.SetTPS(15)
 	err = ebiten.RunGame(sim)
 	if err != nil {
 		slog.Error("failed to run simulation as an ebiten game", "error", err)

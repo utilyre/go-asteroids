@@ -14,11 +14,6 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-const (
-	ticksPerSecond = 60 // ebiten's default
-	deltaTickTime  = time.Second / ticksPerSecond
-)
-
 type Game struct {
 	houseImg *ebiten.Image
 	sess     *mcp.Session
@@ -61,7 +56,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 }
 
 func (g *Game) Update() error {
-	ctx, cancel := context.WithTimeout(context.Background(), deltaTickTime)
+	dt := time.Second / time.Duration(ebiten.TPS())
+
+	ctx, cancel := context.WithTimeout(context.Background(), dt)
 	defer cancel()
 
 	input := state.Input{
@@ -88,7 +85,7 @@ func (g *Game) Update() error {
 		return nil
 	}
 
-	g.state.Update(deltaTickTime, input)
+	g.state.Update(dt, input)
 	return nil
 }
 
