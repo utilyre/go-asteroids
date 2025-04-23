@@ -1,98 +1,62 @@
 package simulation
 
 import (
+	"context"
+	"errors"
 	"image"
+	"log/slog"
+	"multiplayer/internal/mcp"
 	"multiplayer/internal/state"
+	"os"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-const (
-	ticksPerSecond = 60 // ebiten's default
-	deltaTickTime  = time.Second / ticksPerSecond
-)
-
 type Simulation struct {
-	done     <-chan struct{}
 	houseImg *ebiten.Image
-
-	// TODO: generalize to multiplayer
-	inputBuffer1 <-chan state.Input
-	inputBuffer2 <-chan state.Input
-
-	state state.State
+	sess     *mcp.Session
+	state    state.State
 }
 
-func New(done <-chan struct{}, houseImg image.Image) *Simulation {
-	// bufferred channel for testing
-	// TODO: should be a battle tested jitter buffer
-	ch1 := make(chan state.Input, 1)
-	// this "mocks" inputs coming in from a single client
-	go func() {
-		defer close(ch1)
+func New(ctx context.Context, laddr string) (*Simulation, error) {
+	houseImg, err := openImage("./assets/house.png")
+	if err != nil {
+		return nil, err
+	}
 
-		t := time.NewTicker(deltaTickTime)
-		defer t.Stop()
-
-		for {
-			select {
-			case <-done:
-				return
-			case <-t.C:
-			}
-
-			input := state.Input{
-				Left:  ebiten.IsKeyPressed(ebiten.KeyH),
-				Down:  ebiten.IsKeyPressed(ebiten.KeyJ),
-				Up:    ebiten.IsKeyPressed(ebiten.KeyK),
-				Right: ebiten.IsKeyPressed(ebiten.KeyL),
-			}
-
-			select {
-			case ch1 <- input:
-			default:
-			}
-		}
-	}()
-
-	// bufferred channel for testing
-	// TODO: should be a battle tested jitter buffer
-	ch2 := make(chan state.Input, 1)
-	// this "mocks" inputs coming in from a single client
-	go func() {
-		defer close(ch2)
-
-		t := time.NewTicker(deltaTickTime)
-		defer t.Stop()
-
-		for {
-			select {
-			case <-done:
-				return
-			case <-t.C:
-			}
-
-			input := state.Input{
-				Left:  ebiten.IsKeyPressed(ebiten.KeyA),
-				Down:  ebiten.IsKeyPressed(ebiten.KeyS),
-				Up:    ebiten.IsKeyPressed(ebiten.KeyW),
-				Right: ebiten.IsKeyPressed(ebiten.KeyD),
-			}
-
-			select {
-			case ch2 <- input:
-			default:
-			}
-		}
-	}()
+	ln, err := mcp.Listen(laddr, mcp.WithLogger(slog.Default()))
+	if err != nil {
+		return nil, err
+	}
+	sess, err := ln.Accept(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	return &Simulation{
-		done:         done,
-		houseImg:     ebiten.NewImageFromImage(houseImg),
-		inputBuffer1: ch1,
-		inputBuffer2: ch2,
+		houseImg: ebiten.NewImageFromImage(houseImg),
+		sess:     sess,
+		state:    state.State{},
+	}, nil
+}
+
+func openImage(name string) (img image.Image, err error) {
+	f, err := os.Open(name)
+	if err != nil {
+		return nil, err
 	}
+	defer func() { err = errors.Join(err, f.Close()) }()
+
+	img, _, err = image.Decode(f)
+	if err != nil {
+		return nil, err
+	}
+
+	return img, nil
+}
+func (sim *Simulation) Close(ctx context.Context) error {
+	return sim.sess.Close(ctx)
 }
 
 func (sim *Simulation) Layout(int, int) (int, int) {
@@ -100,48 +64,42 @@ func (sim *Simulation) Layout(int, int) (int, int) {
 }
 
 func (sim *Simulation) Draw(screen *ebiten.Image) {
-	var m1 ebiten.GeoM
-	m1.Scale(0.2, 0.2)
-	m1.Translate(sim.state.House1.Trans.X, sim.state.House1.Trans.Y)
+	var m ebiten.GeoM
+	m.Scale(0.2, 0.2)
+	m.Translate(sim.state.House.Trans.X, sim.state.House.Trans.Y)
 	screen.DrawImage(sim.houseImg, &ebiten.DrawImageOptions{
-		GeoM: m1,
-	})
-
-	var m2 ebiten.GeoM
-	m2.Scale(0.2, 0.2)
-	m2.Translate(sim.state.House2.Trans.X, sim.state.House2.Trans.Y)
-	screen.DrawImage(sim.houseImg, &ebiten.DrawImageOptions{
-		GeoM: m2,
+		GeoM: m,
 	})
 }
 
 func (sim *Simulation) Update() error {
-	select {
-	case <-sim.done:
-		return ebiten.Termination
-	default:
-	}
+	dt := time.Second / time.Duration(ebiten.TPS())
+
+	ctx, cancel := context.WithTimeout(context.Background(), dt)
+	defer cancel()
 
 	// try to read input of each player
 	// if no input for any player then they dont get to play on this frame
 	// PERF: use reflect.Select to process the earliest, earlier
 
-	var input1 state.Input
-	select {
-	case input1 = <-sim.inputBuffer1:
-	default:
+	data, err := sim.sess.Receive(ctx)
+	if errors.Is(err, mcp.ErrClosed) {
+		return ebiten.Termination
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return nil
+	}
+	if err != nil {
+		slog.Warn("failed to receive input", "error", err)
+		return nil
+	}
+	var input state.Input
+	err = input.UnmarshalBinary(data)
+	if err != nil {
+		slog.Warn("failed to unmarshal input", "error", err)
+		return nil
 	}
 
-	var input2 state.Input
-	select {
-	case input2 = <-sim.inputBuffer2:
-	default:
-	}
-
-	// sim.state.CreateHouse()
-
-	sim.state.Update(deltaTickTime, 1, input1)
-	sim.state.Update(deltaTickTime, 2, input2)
-
+	sim.state.Update(dt, input)
 	return nil
 }
