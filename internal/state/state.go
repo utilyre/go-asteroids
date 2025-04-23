@@ -1,9 +1,16 @@
 package state
 
 import (
+	"encoding/binary"
+	"errors"
+	"fmt"
 	"math"
 	"time"
 )
+
+var ErrShortData = errors.New("short data")
+
+const InputSize = 1
 
 type Input struct {
 	Left, Down, Up, Right bool
@@ -33,15 +40,21 @@ func (s *State) Update(delta time.Duration, input Input) {
 	s.House.Vel = s.House.Accel.Mul(dt).Add(s.House.Vel)
 }
 
+const StateSize = HouseSize
+
 type State struct {
 	House House
 }
+
+const HouseSize = 3 * Vec2Size
 
 type House struct {
 	Trans Vec2
 	Vel   Vec2
 	Accel Vec2
 }
+
+const Vec2Size = 16
 
 type Vec2 struct{ X, Y float64 }
 
@@ -65,4 +78,118 @@ func (v Vec2) Normalize() Vec2 {
 	v.X /= l
 	v.Y /= l
 	return v
+}
+
+// MarshalBinary encodes Input into a single byte where each bit represents a boolean field
+func (i Input) MarshalBinary() ([]byte, error) {
+	var b byte
+	if i.Left {
+		b |= 1 << 0
+	}
+	if i.Down {
+		b |= 1 << 1
+	}
+	if i.Up {
+		b |= 1 << 2
+	}
+	if i.Right {
+		b |= 1 << 3
+	}
+	return []byte{b}, nil
+}
+
+// UnmarshalBinary decodes a byte into the Input struct
+func (i *Input) UnmarshalBinary(data []byte) error {
+	if l := len(data); l < InputSize {
+		return fmt.Errorf("data length %d less than %d: %w", l, InputSize, ErrShortData)
+	}
+	b := data[0]
+	i.Left = b&(1<<0) != 0
+	i.Down = b&(1<<1) != 0
+	i.Up = b&(1<<2) != 0
+	i.Right = b&(1<<3) != 0
+	return nil
+}
+
+func (s State) MarshalBinary() ([]byte, error) {
+	return s.House.MarshalBinary()
+}
+
+func (s *State) UnmarshalBinary(data []byte) error {
+	return s.House.UnmarshalBinary(data)
+}
+
+func (h House) MarshalBinary() ([]byte, error) {
+	data := make([]byte, HouseSize)
+
+	b, err := h.Trans.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	copy(data, b)
+
+	b, err = h.Vel.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	copy(data[Vec2Size:], b)
+
+	b, err = h.Accel.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	copy(data[2*Vec2Size:], b)
+
+	return data, nil
+}
+
+func (h *House) UnmarshalBinary(data []byte) error {
+	if l := len(data); l < HouseSize {
+		return fmt.Errorf("data length %d less than %d: %w", l, HouseSize, ErrShortData)
+	}
+
+	err := h.Trans.UnmarshalBinary(data)
+	if err != nil {
+		return err
+	}
+	err = h.Vel.UnmarshalBinary(data[Vec2Size:])
+	if err != nil {
+		return err
+	}
+	err = h.Accel.UnmarshalBinary(data[2*Vec2Size:])
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// MarshalBinary encodes Vec2 as two float64s in network order
+func (v Vec2) MarshalBinary() ([]byte, error) {
+	data := make([]byte, Vec2Size)
+	_, err := binary.Encode(data, binary.BigEndian, v.X)
+	if err != nil {
+		return nil, err
+	}
+	_, err = binary.Encode(data[8:], binary.BigEndian, v.Y)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+// UnmarshalBinary decodes two float64s from binary data
+func (v *Vec2) UnmarshalBinary(data []byte) error {
+	if l := len(data); l < Vec2Size {
+		return fmt.Errorf("data length %d less than %d: %w", l, Vec2Size, ErrShortData)
+	}
+	_, err := binary.Decode(data, binary.BigEndian, &v.X)
+	if err != nil {
+		return err
+	}
+	_, err = binary.Decode(data[8:], binary.BigEndian, &v.Y)
+	if err != nil {
+		return err
+	}
+	return nil
 }
