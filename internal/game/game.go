@@ -68,6 +68,7 @@ func (g *Game) Update() error {
 		Right: ebiten.IsKeyPressed(ebiten.KeyL),
 	}
 
+	// TODO: use a buffer for sending inputs to ensure order and reliability
 	data, err := input.MarshalBinary()
 	if err != nil {
 		slog.Warn("failed to marshal input", "error", err)
@@ -85,6 +86,19 @@ func (g *Game) Update() error {
 		return nil
 	}
 
+	// TODO: use an interpolation buffer to prevent jitter
+	//
+	// From https://gafferongames.com/post/snapshot_interpolation
+	// > Now for the trick with snapshots. What we do is instead of
+	// > immediately rendering snapshot data received is that we buffer
+	// > snapshots for a short amount of time in an interpolation buffer. This
+	// > interpolation buffer holds on to snapshots for a period of time such
+	// > that you have not only the snapshot you want to render but also,
+	// > statistically speaking, you are very likely to have the next snapshot
+	// > as well. Then as the right side moves forward in time we interpolate
+	// > between the position and orientation for the two slightly delayed
+	// > snapshots providing the illusion of smooth movement. In effect, we’ve
+	// > traded a small amount of added latency for smoothness.
 	data, err = g.sess.Receive(ctx)
 	if errors.Is(err, mcp.ErrClosed) {
 		return ebiten.Termination
