@@ -44,10 +44,21 @@ for ; ; <-ticker.C {
    go run ./cmd/server
    ```
 
-3. Run `n` clients (`n` > 1 is experimental):
+3. In the server logs, there will be a line similar to the one below that
+   telling you what address the server is bound to:
+
+   ```
+	 11:10:53 INF bound udp/mcp listener address=[ADDRESS]
+	 ```
+
+	 Take note of `[ADDRESS]`.
+
+3. Run the following. Replace `<n>` with the number of clients you'd like to
+   run and also replace `[ADDRESS]` with the one you took note of in the
+   previous step.
 
    ```bash
-   ./spawn_clients.sh <n> # replace <n> with the desired number of clients
+   ./spawn_clients.sh <n> -remote=[ADDRESS]
    ```
 
 [ebitengine_install]: https://ebitengine.org/en/documents/install
