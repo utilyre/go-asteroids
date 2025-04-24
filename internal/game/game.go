@@ -85,7 +85,23 @@ func (g *Game) Update() error {
 		return nil
 	}
 
-	g.state.Update(dt, input)
+	data, err = g.sess.Receive(ctx)
+	if errors.Is(err, mcp.ErrClosed) {
+		return ebiten.Termination
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return nil
+	}
+	if err != nil {
+		slog.Warn("failed to receive state", "error", err)
+		return nil
+	}
+	err = g.state.UnmarshalBinary(data)
+	if err != nil {
+		slog.Warn("failed to unmarshal state", "error", err)
+		return nil
+	}
+
 	return nil
 }
 

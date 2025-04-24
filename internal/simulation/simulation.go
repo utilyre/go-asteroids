@@ -103,5 +103,23 @@ func (sim *Simulation) Update() error {
 	}
 
 	sim.state.Update(dt, input)
+
+	data, err = sim.state.MarshalBinary()
+	if err != nil {
+		slog.Warn("failed to marshal state", "error", err)
+		return nil
+	}
+	err = sim.sess.Send(ctx, data)
+	if errors.Is(err, mcp.ErrClosed) {
+		return ebiten.Termination
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return nil
+	}
+	if err != nil {
+		slog.Warn("failed to send state", "error", err)
+		return nil
+	}
+
 	return nil
 }
