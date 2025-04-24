@@ -29,6 +29,8 @@ func New(ctx context.Context, laddr string) (*Simulation, error) {
 	if err != nil {
 		return nil, err
 	}
+	slog.Info("bound udp/mcp listener", "address", ln.LocalAddr())
+
 	sess, err := ln.Accept(ctx)
 	if err != nil {
 		return nil, err
