@@ -477,6 +477,15 @@ func (sess *Session) Receive(ctx context.Context) ([]byte, error) {
 	}
 }
 
+func (sess *Session) TryReceive() ([]byte, bool) {
+	select {
+	case data := <-sess.inbox:
+		return data, true
+	default:
+		return nil, false
+	}
+}
+
 func (sess *Session) Send(ctx context.Context, data []byte) error {
 	select {
 	case <-sess.die:
@@ -485,6 +494,15 @@ func (sess *Session) Send(ctx context.Context, data []byte) error {
 		return ctx.Err()
 	case sess.outbox <- data:
 		return nil
+	}
+}
+
+func (sess *Session) TrySend(data []byte) bool {
+	select {
+	case sess.outbox <- data:
+		return true
+	default:
+		return false
 	}
 }
 
