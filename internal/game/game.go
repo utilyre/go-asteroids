@@ -72,7 +72,6 @@ func (g *Game) snapshotLoop() {
 		}
 		index := binary.BigEndian.Uint32(data)
 		if index <= g.lastStateIndex {
-			slog.Debug("dropped old state", "index", index, "current", g.lastStateIndex)
 			continue
 		}
 
@@ -162,9 +161,6 @@ func (g *Game) Update() error {
 		// prev                  next     now
 		t := now.Sub(g.nextSnapshot.t).Seconds() / g.nextSnapshot.t.Sub(g.prevSnapshot.t).Seconds()
 
-		if t > 1 {
-			// slog.Debug("times", "t", t) // t gets high when multiple clients
-		}
 		g.state = g.prevSnapshot.s.Lerp(g.nextSnapshot.s, t)
 	}
 	g.snapshotLock.Unlock()
