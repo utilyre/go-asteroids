@@ -217,24 +217,15 @@ func (ln *Listener) Accept(ctx context.Context) (*Session, error) {
 }
 
 func (ln *Listener) Broadcast(ctx context.Context, data []byte) error {
-	ln.sessionCond.L.Lock()
-
 	const (
 		caseDie = 0
 		caseCtx = 1
 	)
 
 	dataVal := reflect.ValueOf(data)
+	ln.sessionCond.L.Lock()
 	numSessions := len(ln.sessions)
 	cases := make([]reflect.SelectCase, 2, 2+numSessions)
-	cases[caseDie] = reflect.SelectCase{
-		Dir:  reflect.SelectRecv,
-		Chan: reflect.ValueOf(ln.die),
-	}
-	cases[caseCtx] = reflect.SelectCase{
-		Dir:  reflect.SelectRecv,
-		Chan: reflect.ValueOf(ctx.Done()),
-	}
 	for _, sess := range ln.sessions {
 		cases = append(cases, reflect.SelectCase{
 			Dir:  reflect.SelectSend,
@@ -243,6 +234,14 @@ func (ln *Listener) Broadcast(ctx context.Context, data []byte) error {
 		})
 	}
 	ln.sessionCond.L.Unlock()
+	cases[caseDie] = reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(ln.die),
+	}
+	cases[caseCtx] = reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(ctx.Done()),
+	}
 
 	for numSent := 0; numSent < numSessions; numSent++ {
 		chosenIdx, _, open := reflect.Select(cases)
