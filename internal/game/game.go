@@ -9,15 +9,24 @@ import (
 	"multiplayer/internal/mcp"
 	"multiplayer/internal/state"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
+type snapshot struct {
+	s state.State
+	t time.Time
+}
+
 type Game struct {
-	houseImg *ebiten.Image
-	sess     *mcp.Session
-	state    state.State
+	houseImg     *ebiten.Image
+	sess         *mcp.Session
+	state        state.State
+	prevSnapshot snapshot
+	nextSnapshot snapshot
+	snapshotLock sync.Mutex
 }
 
 func New(ctx context.Context, raddr string) (*Game, error) {
@@ -31,11 +40,43 @@ func New(ctx context.Context, raddr string) (*Game, error) {
 		return nil, err
 	}
 
-	return &Game{
-		houseImg: ebiten.NewImageFromImage(houseImg),
-		sess:     sess,
-		state:    state.State{},
-	}, nil
+	g := &Game{
+		houseImg:     ebiten.NewImageFromImage(houseImg),
+		sess:         sess,
+		state:        state.State{},
+		prevSnapshot: snapshot{},
+		nextSnapshot: snapshot{},
+		snapshotLock: sync.Mutex{},
+	}
+	go g.snapshotLoop()
+	return g, nil
+}
+
+func (g *Game) snapshotLoop() {
+	ctx := context.Background()
+	for {
+		data, err := g.sess.Receive(ctx)
+		if errors.Is(err, mcp.ErrClosed) {
+			break
+		}
+		if err != nil {
+			slog.Warn("failed to receive state", "error", err)
+			continue
+		}
+		var s state.State
+		err = s.UnmarshalBinary(data)
+		if err != nil {
+			slog.Warn("failed to unmarshal state", "error", err)
+			continue
+		}
+		g.snapshotLock.Lock()
+		g.prevSnapshot = g.nextSnapshot
+		g.nextSnapshot = snapshot{
+			s: s,
+			t: time.Now(),
+		}
+		g.snapshotLock.Unlock()
+	}
 }
 
 func (g *Game) Close(ctx context.Context) error {
@@ -86,35 +127,31 @@ func (g *Game) Update() error {
 		return nil
 	}
 
-	// TODO: use an interpolation buffer to prevent jitter
-	//
-	// From https://gafferongames.com/post/snapshot_interpolation
-	// > Now for the trick with snapshots. What we do is instead of
-	// > immediately rendering snapshot data received is that we buffer
-	// > snapshots for a short amount of time in an interpolation buffer. This
-	// > interpolation buffer holds on to snapshots for a period of time such
-	// > that you have not only the snapshot you want to render but also,
-	// > statistically speaking, you are very likely to have the next snapshot
-	// > as well. Then as the right side moves forward in time we interpolate
-	// > between the position and orientation for the two slightly delayed
-	// > snapshots providing the illusion of smooth movement. In effect, we’ve
-	// > traded a small amount of added latency for smoothness.
-	data, err = g.sess.Receive(ctx)
-	if errors.Is(err, mcp.ErrClosed) {
-		return ebiten.Termination
+	g.snapshotLock.Lock()
+	if !g.nextSnapshot.t.IsZero() {
+		now := time.Now()
+
+		// We'd ideally like to interpolate from the last frame to the next
+		// frame, that is in the future. However, what actually happens is that
+		// the two frames have already happened and our interpolation is forced
+		// to delay from the reality in order to work properly. This is why t
+		// is calculated by working out what fraction does $now - next$ have
+		// over the duration between the two frames ($next - prev$), instead of
+		// working out $now - prev$ over $next - prev$.
+		//
+		// Ideal:
+		//  |-------|______________|
+		// prev    now           next
+		//
+		// Reality:
+		//  |______________________|-------|
+		// prev                  next     now
+		t := now.Sub(g.nextSnapshot.t).Seconds() / g.nextSnapshot.t.Sub(g.prevSnapshot.t).Seconds()
+
+		slog.Debug("times", "t", t)
+		g.state = g.prevSnapshot.s.Lerp(g.nextSnapshot.s, t)
 	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return nil
-	}
-	if err != nil {
-		slog.Warn("failed to receive state", "error", err)
-		return nil
-	}
-	err = g.state.UnmarshalBinary(data)
-	if err != nil {
-		slog.Warn("failed to unmarshal state", "error", err)
-		return nil
-	}
+	g.snapshotLock.Unlock()
 
 	return nil
 }

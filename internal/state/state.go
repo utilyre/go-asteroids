@@ -46,6 +46,13 @@ type State struct {
 	House House
 }
 
+func (s State) Lerp(other State, t float64) State {
+	s.House.Trans = s.House.Trans.Lerp(other.House.Trans, t)
+	s.House.Vel = s.House.Vel.Lerp(other.House.Vel, t)
+	s.House.Accel = s.House.Accel.Lerp(other.House.Accel, t)
+	return s
+}
+
 const HouseSize = 3 * Vec2Size
 
 type House struct {
@@ -57,6 +64,23 @@ type House struct {
 const Vec2Size = 16
 
 type Vec2 struct{ X, Y float64 }
+
+func lerp(a, b, t float64) float64 {
+	if t <= 0 {
+		return a
+	}
+	if t >= 1 {
+		return b
+	}
+
+	return a + (b-a)*t
+}
+
+func (v Vec2) Lerp(other Vec2, t float64) Vec2 {
+	v.X = lerp(v.X, other.X, t)
+	v.Y = lerp(v.Y, other.Y, t)
+	return v
+}
 
 func (v Vec2) Add(other Vec2) Vec2 {
 	v.X += other.X
