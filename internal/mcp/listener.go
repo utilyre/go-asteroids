@@ -244,6 +244,7 @@ func (ln *Listener) Broadcast(ctx context.Context, data []byte) error {
 	}
 
 	for numSent := 0; numSent < numSessions; numSent++ {
+		// TODO: will the following line panic when a session closes?
 		chosenIdx, _, open := reflect.Select(cases)
 		if !open {
 			switch chosenIdx {
@@ -251,8 +252,6 @@ func (ln *Listener) Broadcast(ctx context.Context, data []byte) error {
 				return ErrClosed
 			case caseCtx:
 				return ctx.Err()
-			default:
-				continue
 			}
 		}
 		cases[chosenIdx].Chan = reflect.Value{}
