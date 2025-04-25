@@ -2,6 +2,7 @@ package game
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"image"
 	_ "image/png"
@@ -21,12 +22,13 @@ type snapshot struct {
 }
 
 type Game struct {
-	houseImg     *ebiten.Image
-	sess         *mcp.Session
-	state        state.State
-	prevSnapshot snapshot
-	nextSnapshot snapshot
-	snapshotLock sync.Mutex
+	houseImg       *ebiten.Image
+	sess           *mcp.Session
+	state          state.State
+	lastStateIndex uint32
+	prevSnapshot   snapshot
+	nextSnapshot   snapshot
+	snapshotLock   sync.Mutex
 }
 
 func New(ctx context.Context, raddr string) (*Game, error) {
@@ -41,12 +43,13 @@ func New(ctx context.Context, raddr string) (*Game, error) {
 	}
 
 	g := &Game{
-		houseImg:     ebiten.NewImageFromImage(houseImg),
-		sess:         sess,
-		state:        state.State{},
-		prevSnapshot: snapshot{},
-		nextSnapshot: snapshot{},
-		snapshotLock: sync.Mutex{},
+		houseImg:       ebiten.NewImageFromImage(houseImg),
+		sess:           sess,
+		state:          state.State{},
+		lastStateIndex: 0,
+		prevSnapshot:   snapshot{},
+		nextSnapshot:   snapshot{},
+		snapshotLock:   sync.Mutex{},
 	}
 	go g.snapshotLoop()
 	return g, nil
@@ -63,8 +66,18 @@ func (g *Game) snapshotLoop() {
 			slog.Warn("failed to receive state", "error", err)
 			continue
 		}
+		if len(data) < 4 {
+			slog.Warn("state data is smaller than uint32", "length", len(data))
+			continue
+		}
+		index := binary.BigEndian.Uint32(data)
+		if index <= g.lastStateIndex {
+			slog.Debug("dropped old state", "index", index, "current", g.lastStateIndex)
+			continue
+		}
+
 		var s state.State
-		err = s.UnmarshalBinary(data)
+		err = s.UnmarshalBinary(data[4:])
 		if err != nil {
 			slog.Warn("failed to unmarshal state", "error", err)
 			continue
@@ -76,6 +89,7 @@ func (g *Game) snapshotLoop() {
 			t: time.Now(),
 		}
 		g.snapshotLock.Unlock()
+		g.lastStateIndex = index
 	}
 }
 
@@ -148,7 +162,9 @@ func (g *Game) Update() error {
 		// prev                  next     now
 		t := now.Sub(g.nextSnapshot.t).Seconds() / g.nextSnapshot.t.Sub(g.prevSnapshot.t).Seconds()
 
-		slog.Debug("times", "t", t)
+		if t > 1 {
+			// slog.Debug("times", "t", t) // t gets high when multiple clients
+		}
 		g.state = g.prevSnapshot.s.Lerp(g.nextSnapshot.s, t)
 	}
 	g.snapshotLock.Unlock()

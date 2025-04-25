@@ -2,6 +2,7 @@ package simulation
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"image"
 	"log/slog"
@@ -15,11 +16,12 @@ import (
 )
 
 type Simulation struct {
-	houseImg    *ebiten.Image
-	ln          *mcp.Listener
-	sessions    map[string]*mcp.Session
-	sessionLock sync.Mutex
-	state       state.State
+	houseImg       *ebiten.Image
+	ln             *mcp.Listener
+	sessions       map[string]*mcp.Session
+	sessionLock    sync.Mutex
+	state          state.State
+	lastStateIndex uint32
 }
 
 func New(ctx context.Context, laddr string) (*Simulation, error) {
@@ -35,11 +37,12 @@ func New(ctx context.Context, laddr string) (*Simulation, error) {
 	slog.Info("bound udp/mcp listener", "address", ln.LocalAddr())
 
 	sim := &Simulation{
-		houseImg:    ebiten.NewImageFromImage(houseImg),
-		ln:          ln,
-		sessions:    map[string]*mcp.Session{},
-		sessionLock: sync.Mutex{},
-		state:       state.State{},
+		houseImg:       ebiten.NewImageFromImage(houseImg),
+		ln:             ln,
+		sessions:       map[string]*mcp.Session{},
+		sessionLock:    sync.Mutex{},
+		state:          state.State{},
+		lastStateIndex: 0,
 	}
 	go sim.acceptLoop()
 	return sim, nil
@@ -107,7 +110,6 @@ func (sim *Simulation) Update() error {
 	for _, sess := range sim.sessions {
 		data, succeeded := sess.TryReceive()
 		if !succeeded {
-			slog.Debug("failed to receive from session", "raddr", sess.RemoteAddr())
 			continue
 		}
 		inputDatas = append(inputDatas, data)
@@ -124,11 +126,14 @@ func (sim *Simulation) Update() error {
 		sim.state.Update(dt, input)
 	}
 
-	data, err := sim.state.MarshalBinary()
+	data := make([]byte, 4+state.StateSize)
+	binary.BigEndian.PutUint32(data, sim.lastStateIndex)
+	stateData, err := sim.state.MarshalBinary()
 	if err != nil {
 		slog.Warn("failed to marshal state", "error", err)
 		return nil
 	}
+	copy(data[4:], stateData)
 	err = sim.ln.Broadcast(ctx, data)
 	if errors.Is(err, mcp.ErrClosed) {
 		return ebiten.Termination
@@ -140,6 +145,7 @@ func (sim *Simulation) Update() error {
 		slog.Warn("failed to send state", "error", err)
 		return nil
 	}
+	sim.lastStateIndex++
 
 	return nil
 }
