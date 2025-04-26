@@ -2,21 +2,26 @@ package simulation
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"image"
 	"log/slog"
 	"multiplayer/internal/mcp"
 	"multiplayer/internal/state"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
 type Simulation struct {
-	houseImg *ebiten.Image
-	sess     *mcp.Session
-	state    state.State
+	houseImg       *ebiten.Image
+	ln             *mcp.Listener
+	sessions       map[string]*mcp.Session
+	sessionLock    sync.Mutex
+	state          state.State
+	lastStateIndex uint32
 }
 
 func New(ctx context.Context, laddr string) (*Simulation, error) {
@@ -31,16 +36,36 @@ func New(ctx context.Context, laddr string) (*Simulation, error) {
 	}
 	slog.Info("bound udp/mcp listener", "address", ln.LocalAddr())
 
-	sess, err := ln.Accept(ctx)
-	if err != nil {
-		return nil, err
+	sim := &Simulation{
+		houseImg:       ebiten.NewImageFromImage(houseImg),
+		ln:             ln,
+		sessions:       map[string]*mcp.Session{},
+		sessionLock:    sync.Mutex{},
+		state:          state.State{},
+		lastStateIndex: 0,
 	}
+	go sim.acceptLoop()
+	return sim, nil
+}
 
-	return &Simulation{
-		houseImg: ebiten.NewImageFromImage(houseImg),
-		sess:     sess,
-		state:    state.State{},
-	}, nil
+func (sim *Simulation) acceptLoop() {
+	ctx := context.Background()
+	for {
+		sess, err := sim.ln.Accept(ctx)
+		if errors.Is(err, mcp.ErrClosed) {
+			break
+		}
+		if err != nil {
+			slog.Warn("failed to accept session", "error", err)
+			continue
+		}
+
+		// TODO: remove sess from sessions whenever closed
+
+		sim.sessionLock.Lock()
+		sim.sessions[sess.RemoteAddr().String()] = sess
+		sim.sessionLock.Unlock()
+	}
 }
 
 func openImage(name string) (img image.Image, err error) {
@@ -58,7 +83,7 @@ func openImage(name string) (img image.Image, err error) {
 	return img, nil
 }
 func (sim *Simulation) Close(ctx context.Context) error {
-	return sim.sess.Close(ctx)
+	return sim.ln.Close(ctx)
 }
 
 func (sim *Simulation) Layout(int, int) (int, int) {
@@ -80,11 +105,38 @@ func (sim *Simulation) Update() error {
 	ctx, cancel := context.WithTimeout(context.Background(), dt)
 	defer cancel()
 
-	// try to read input of each player
-	// if no input for any player then they dont get to play on this frame
-	// PERF: use reflect.Select to process the earliest, earlier
+	// collect data and then process it to reduce the duration at which the
+	// lock is held.
+	var inputDatas [][]byte
+	sim.sessionLock.Lock()
+	for _, sess := range sim.sessions {
+		data, succeeded := sess.TryReceive()
+		if !succeeded {
+			continue
+		}
+		inputDatas = append(inputDatas, data)
+	}
+	sim.sessionLock.Unlock()
 
-	data, err := sim.sess.Receive(ctx)
+	for _, data := range inputDatas {
+		var input state.Input
+		err := input.UnmarshalBinary(data)
+		if err != nil {
+			slog.Warn("failed to unmarshal input", "error", err)
+			return nil
+		}
+		sim.state.Update(dt, input)
+	}
+
+	data := make([]byte, 4+state.StateSize)
+	binary.BigEndian.PutUint32(data, sim.lastStateIndex)
+	stateData, err := sim.state.MarshalBinary()
+	if err != nil {
+		slog.Warn("failed to marshal state", "error", err)
+		return nil
+	}
+	copy(data[4:], stateData)
+	err = sim.ln.Broadcast(ctx, data)
 	if errors.Is(err, mcp.ErrClosed) {
 		return ebiten.Termination
 	}
@@ -92,16 +144,10 @@ func (sim *Simulation) Update() error {
 		return nil
 	}
 	if err != nil {
-		slog.Warn("failed to receive input", "error", err)
+		slog.Warn("failed to send state", "error", err)
 		return nil
 	}
-	var input state.Input
-	err = input.UnmarshalBinary(data)
-	if err != nil {
-		slog.Warn("failed to unmarshal input", "error", err)
-		return nil
-	}
+	sim.lastStateIndex++
 
-	sim.state.Update(dt, input)
 	return nil
 }

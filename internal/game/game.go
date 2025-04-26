@@ -2,6 +2,7 @@ package game
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"image"
 	_ "image/png"
@@ -9,15 +10,25 @@ import (
 	"multiplayer/internal/mcp"
 	"multiplayer/internal/state"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
+type snapshot struct {
+	s state.State
+	t time.Time
+}
+
 type Game struct {
-	houseImg *ebiten.Image
-	sess     *mcp.Session
-	state    state.State
+	houseImg       *ebiten.Image
+	sess           *mcp.Session
+	state          state.State
+	lastStateIndex uint32
+	prevSnapshot   snapshot
+	nextSnapshot   snapshot
+	snapshotLock   sync.Mutex
 }
 
 func New(ctx context.Context, raddr string) (*Game, error) {
@@ -31,11 +42,54 @@ func New(ctx context.Context, raddr string) (*Game, error) {
 		return nil, err
 	}
 
-	return &Game{
-		houseImg: ebiten.NewImageFromImage(houseImg),
-		sess:     sess,
-		state:    state.State{},
-	}, nil
+	g := &Game{
+		houseImg:       ebiten.NewImageFromImage(houseImg),
+		sess:           sess,
+		state:          state.State{},
+		lastStateIndex: 0,
+		prevSnapshot:   snapshot{},
+		nextSnapshot:   snapshot{},
+		snapshotLock:   sync.Mutex{},
+	}
+	go g.snapshotLoop()
+	return g, nil
+}
+
+func (g *Game) snapshotLoop() {
+	ctx := context.Background()
+	for {
+		data, err := g.sess.Receive(ctx)
+		if errors.Is(err, mcp.ErrClosed) {
+			break
+		}
+		if err != nil {
+			slog.Warn("failed to receive state", "error", err)
+			continue
+		}
+		if len(data) < 4 {
+			slog.Warn("state data is smaller than uint32", "length", len(data))
+			continue
+		}
+		index := binary.BigEndian.Uint32(data)
+		if index <= g.lastStateIndex {
+			continue
+		}
+
+		var s state.State
+		err = s.UnmarshalBinary(data[4:])
+		if err != nil {
+			slog.Warn("failed to unmarshal state", "error", err)
+			continue
+		}
+		g.snapshotLock.Lock()
+		g.prevSnapshot = g.nextSnapshot
+		g.nextSnapshot = snapshot{
+			s: s,
+			t: time.Now(),
+		}
+		g.snapshotLock.Unlock()
+		g.lastStateIndex = index
+	}
 }
 
 func (g *Game) Close(ctx context.Context) error {
@@ -68,6 +122,7 @@ func (g *Game) Update() error {
 		Right: ebiten.IsKeyPressed(ebiten.KeyL),
 	}
 
+	// TODO: use a buffer for sending inputs to ensure order and reliability
 	data, err := input.MarshalBinary()
 	if err != nil {
 		slog.Warn("failed to marshal input", "error", err)
@@ -85,7 +140,31 @@ func (g *Game) Update() error {
 		return nil
 	}
 
-	g.state.Update(dt, input)
+	g.snapshotLock.Lock()
+	if !g.nextSnapshot.t.IsZero() {
+		now := time.Now()
+
+		// We'd ideally like to interpolate from the last frame to the next
+		// frame, that is in the future. However, what actually happens is that
+		// the two frames have already happened and our interpolation is forced
+		// to delay from the reality in order to work properly. This is why t
+		// is calculated by working out what fraction does $now - next$ have
+		// over the duration between the two frames ($next - prev$), instead of
+		// working out $now - prev$ over $next - prev$.
+		//
+		// Ideal:
+		//  |-------|______________|
+		// prev    now           next
+		//
+		// Reality:
+		//  |______________________|-------|
+		// prev                  next     now
+		t := now.Sub(g.nextSnapshot.t).Seconds() / g.nextSnapshot.t.Sub(g.prevSnapshot.t).Seconds()
+
+		g.state = g.prevSnapshot.s.Lerp(g.nextSnapshot.s, t)
+	}
+	g.snapshotLock.Unlock()
+
 	return nil
 }
 

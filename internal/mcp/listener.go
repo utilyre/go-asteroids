@@ -217,24 +217,15 @@ func (ln *Listener) Accept(ctx context.Context) (*Session, error) {
 }
 
 func (ln *Listener) Broadcast(ctx context.Context, data []byte) error {
-	ln.sessionCond.L.Lock()
-
 	const (
 		caseDie = 0
 		caseCtx = 1
 	)
 
 	dataVal := reflect.ValueOf(data)
+	ln.sessionCond.L.Lock()
 	numSessions := len(ln.sessions)
 	cases := make([]reflect.SelectCase, 2, 2+numSessions)
-	cases[caseDie] = reflect.SelectCase{
-		Dir:  reflect.SelectRecv,
-		Chan: reflect.ValueOf(ln.die),
-	}
-	cases[caseCtx] = reflect.SelectCase{
-		Dir:  reflect.SelectRecv,
-		Chan: reflect.ValueOf(ctx.Done()),
-	}
 	for _, sess := range ln.sessions {
 		cases = append(cases, reflect.SelectCase{
 			Dir:  reflect.SelectSend,
@@ -243,8 +234,17 @@ func (ln *Listener) Broadcast(ctx context.Context, data []byte) error {
 		})
 	}
 	ln.sessionCond.L.Unlock()
+	cases[caseDie] = reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(ln.die),
+	}
+	cases[caseCtx] = reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(ctx.Done()),
+	}
 
 	for numSent := 0; numSent < numSessions; numSent++ {
+		// TODO: will the following line panic when a session closes?
 		chosenIdx, _, open := reflect.Select(cases)
 		if !open {
 			switch chosenIdx {
@@ -252,8 +252,6 @@ func (ln *Listener) Broadcast(ctx context.Context, data []byte) error {
 				return ErrClosed
 			case caseCtx:
 				return ctx.Err()
-			default:
-				continue
 			}
 		}
 		cases[chosenIdx].Chan = reflect.Value{}
@@ -477,6 +475,15 @@ func (sess *Session) Receive(ctx context.Context) ([]byte, error) {
 	}
 }
 
+func (sess *Session) TryReceive() ([]byte, bool) {
+	select {
+	case data := <-sess.inbox:
+		return data, true
+	default:
+		return nil, false
+	}
+}
+
 func (sess *Session) Send(ctx context.Context, data []byte) error {
 	select {
 	case <-sess.die:
@@ -485,6 +492,15 @@ func (sess *Session) Send(ctx context.Context, data []byte) error {
 		return ctx.Err()
 	case sess.outbox <- data:
 		return nil
+	}
+}
+
+func (sess *Session) TrySend(data []byte) bool {
+	select {
+	case sess.outbox <- data:
+		return true
+	default:
+		return false
 	}
 }
 
