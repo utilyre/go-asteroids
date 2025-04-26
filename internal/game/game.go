@@ -21,14 +21,22 @@ type snapshot struct {
 	t time.Time
 }
 
+type inputWithIndex struct {
+	index uint32
+	state.Input
+}
+
 type Game struct {
-	houseImg       *ebiten.Image
-	sess           *mcp.Session
-	state          state.State
-	lastStateIndex uint32
-	prevSnapshot   snapshot
-	nextSnapshot   snapshot
-	snapshotLock   sync.Mutex
+	houseImg        *ebiten.Image
+	sess            *mcp.Session
+	lastInputIndex  uint32
+	inputBuffer     []inputWithIndex
+	inputBufferLock sync.Mutex
+	state           state.State
+	lastStateIndex  uint32
+	prevSnapshot    snapshot
+	nextSnapshot    snapshot
+	snapshotLock    sync.Mutex
 }
 
 func New(ctx context.Context, raddr string) (*Game, error) {
@@ -43,19 +51,62 @@ func New(ctx context.Context, raddr string) (*Game, error) {
 	}
 
 	g := &Game{
-		houseImg:       ebiten.NewImageFromImage(houseImg),
-		sess:           sess,
-		state:          state.State{},
-		lastStateIndex: 0,
-		prevSnapshot:   snapshot{},
-		nextSnapshot:   snapshot{},
-		snapshotLock:   sync.Mutex{},
+		houseImg:        ebiten.NewImageFromImage(houseImg),
+		sess:            sess,
+		lastInputIndex:  0,
+		inputBuffer:     nil,
+		inputBufferLock: sync.Mutex{},
+		state:           state.State{},
+		lastStateIndex:  0,
+		prevSnapshot:    snapshot{},
+		nextSnapshot:    snapshot{},
+		snapshotLock:    sync.Mutex{},
 	}
-	go g.snapshotLoop()
+	go g.sendLoop()
+	go g.receiveLoop()
 	return g, nil
 }
 
-func (g *Game) snapshotLoop() {
+func (g *Game) sendLoop() {
+	ctx := context.Background()
+	ticker := time.NewTicker(time.Second / 30)
+	defer ticker.Stop()
+	for ; ; <-ticker.C {
+		ctx, cancel := context.WithTimeout(ctx, time.Second/30)
+
+		g.inputBufferLock.Lock()
+		data := make([]byte, len(g.inputBuffer)*(4+state.InputSize))
+		for i, input := range g.inputBuffer {
+			b, err := input.MarshalBinary()
+			if err != nil {
+				slog.Warn("failed to marshal input", "error", err)
+				continue
+			}
+			binary.BigEndian.PutUint32(data[i*(4+state.InputSize):], input.index)
+			copy(data[i*(4+state.InputSize)+4:], b)
+		}
+		g.inputBufferLock.Unlock()
+
+		err := g.sess.Send(ctx, data)
+		cancel()
+		if err != nil {
+			slog.Warn("failed to send input", "error", err)
+			continue
+		}
+	}
+}
+
+// mutates underlying inputs elements
+func flushInputsUntil(inputs []inputWithIndex, index uint32) []inputWithIndex {
+	idx := 0
+	for idx < len(inputs) && inputs[idx].index <= index {
+		idx++
+	}
+	copy(inputs, inputs[idx:])
+	return inputs[:len(inputs)-idx]
+}
+
+func (g *Game) receiveLoop() {
 	ctx := context.Background()
 	for {
 		data, err := g.sess.Receive(ctx)
@@ -66,29 +117,48 @@ func (g *Game) snapshotLoop() {
 			slog.Warn("failed to receive state", "error", err)
 			continue
 		}
-		if len(data) < 4 {
-			slog.Warn("state data is smaller than uint32", "length", len(data))
-			continue
-		}
-		index := binary.BigEndian.Uint32(data)
-		if index <= g.lastStateIndex {
+		if len(data) < 2 {
+			slog.Warn("received data does not contain type")
 			continue
 		}
 
-		var s state.State
-		err = s.UnmarshalBinary(data[4:])
-		if err != nil {
-			slog.Warn("failed to unmarshal state", "error", err)
-			continue
+		typ := binary.BigEndian.Uint16(data)
+		switch typ {
+		case 0: // input ack
+			if l := len(data); l < 4 {
+				slog.Warn("input acknowledgement is smaller than uint32", "length", l)
+				continue
+			}
+			index := binary.BigEndian.Uint32(data)
+			g.inputBufferLock.Lock()
+			g.inputBuffer = flushInputsUntil(g.inputBuffer, index)
+			g.inputBufferLock.Unlock()
+
+		case 1: // state
+			if len(data) < 4 {
+				slog.Warn("state data is smaller than uint32", "length", len(data))
+				continue
+			}
+			index := binary.BigEndian.Uint32(data)
+			if index <= g.lastStateIndex {
+				continue
+			}
+
+			var s state.State
+			err = s.UnmarshalBinary(data[4:])
+			if err != nil {
+				slog.Warn("failed to unmarshal state", "error", err)
+				continue
+			}
+			g.snapshotLock.Lock()
+			g.prevSnapshot = g.nextSnapshot
+			g.nextSnapshot = snapshot{
+				s: s,
+				t: time.Now(),
+			}
+			g.snapshotLock.Unlock()
+			g.lastStateIndex = index
 		}
-		g.snapshotLock.Lock()
-		g.prevSnapshot = g.nextSnapshot
-		g.nextSnapshot = snapshot{
-			s: s,
-			t: time.Now(),
-		}
-		g.snapshotLock.Unlock()
-		g.lastStateIndex = index
 	}
 }
 
@@ -110,10 +180,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 }
 
 func (g *Game) Update() error {
-	dt := time.Second / time.Duration(ebiten.TPS())
+	/* dt := time.Second / time.Duration(ebiten.TPS())
 
 	ctx, cancel := context.WithTimeout(context.Background(), dt)
-	defer cancel()
+	defer cancel() */
 
 	input := state.Input{
 		Left:  ebiten.IsKeyPressed(ebiten.KeyH),
@@ -122,23 +192,13 @@ func (g *Game) Update() error {
 		Right: ebiten.IsKeyPressed(ebiten.KeyL),
 	}
 
-	// TODO: use a buffer for sending inputs to ensure order and reliability
-	data, err := input.MarshalBinary()
-	if err != nil {
-		slog.Warn("failed to marshal input", "error", err)
-		return nil
-	}
-	err = g.sess.Send(ctx, data)
-	if errors.Is(err, mcp.ErrClosed) {
-		return ebiten.Termination
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return nil
-	}
-	if err != nil {
-		slog.Warn("failed to send input", "error", err)
-		return nil
-	}
+	g.inputBufferLock.Lock()
+	g.inputBuffer = append(g.inputBuffer, inputWithIndex{
+		index: g.lastInputIndex,
+		Input: input,
+	})
+	g.lastInputIndex++
+	g.inputBufferLock.Unlock()
 
 	g.snapshotLock.Lock()
 	if !g.nextSnapshot.t.IsZero() {
