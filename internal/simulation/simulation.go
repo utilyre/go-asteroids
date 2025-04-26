@@ -105,6 +105,8 @@ func (sim *Simulation) Update() error {
 	ctx, cancel := context.WithTimeout(context.Background(), dt)
 	defer cancel()
 
+	// collect data and then process it to reduce the duration at which the
+	// lock is held.
 	var inputDatas [][]byte
 	sim.sessionLock.Lock()
 	for _, sess := range sim.sessions {
