@@ -7,6 +7,7 @@ import (
 	"image"
 	_ "image/png"
 	"log/slog"
+	"multiplayer/internal/jitter"
 	"multiplayer/internal/mcp"
 	"multiplayer/internal/state"
 	"os"
@@ -21,18 +22,12 @@ type snapshot struct {
 	t time.Time
 }
 
-type inputWithIndex struct {
-	index uint32
-	state.Input
-}
-
 type Game struct {
 	houseImg *ebiten.Image
 	sess     *mcp.Session
 
-	inputBuffer     []inputWithIndex
+	inputBuffer     jitter.Buffer
 	inputBufferLock sync.Mutex
-	lastInputIndex  uint32
 
 	state          state.State
 	prevSnapshot   snapshot
@@ -55,8 +50,7 @@ func New(ctx context.Context, raddr string) (*Game, error) {
 	g := &Game{
 		houseImg:        ebiten.NewImageFromImage(houseImg),
 		sess:            sess,
-		lastInputIndex:  0,
-		inputBuffer:     nil,
+		inputBuffer:     jitter.Buffer{},
 		inputBufferLock: sync.Mutex{},
 		state:           state.State{},
 		lastStateIndex:  0,
@@ -77,36 +71,20 @@ func (g *Game) sendLoop() {
 		ctx, cancel := context.WithTimeout(ctx, time.Second/30)
 
 		g.inputBufferLock.Lock()
-		data := make([]byte, 4+len(g.inputBuffer)*(4+state.InputSize))
-		binary.BigEndian.PutUint32(data, uint32(len(g.inputBuffer)))
-		for i, input := range g.inputBuffer {
-			b, err := input.MarshalBinary()
-			if err != nil {
-				slog.Warn("failed to marshal input", "error", err)
-				continue
-			}
-			binary.BigEndian.PutUint32(data[4+i*(4+state.InputSize):], input.index)
-			copy(data[4+i*(4+state.InputSize)+4:], b)
-		}
+		data, err := g.inputBuffer.MarshalBinary()
 		g.inputBufferLock.Unlock()
+		if err != nil {
+			slog.Warn("failed to marshal input buffer", "error", err)
+			continue
+		}
 
-		err := g.sess.Send(ctx, data)
+		err = g.sess.Send(ctx, data)
 		cancel()
 		if err != nil {
 			slog.Warn("failed to send input", "error", err)
 			continue
 		}
 	}
-}
-
-// mutates underlying inputs elements
-func flushInputsUntil(inputs []inputWithIndex, index uint32) []inputWithIndex {
-	idx := 0
-	for idx < len(inputs) && inputs[idx].index <= index {
-		idx++
-	}
-	copy(inputs, inputs[idx:])
-	return inputs[:len(inputs)-idx]
 }
 
 func (g *Game) receiveLoop() {
@@ -134,7 +112,7 @@ func (g *Game) receiveLoop() {
 			}
 			index := binary.BigEndian.Uint32(data)
 			g.inputBufferLock.Lock()
-			g.inputBuffer = flushInputsUntil(g.inputBuffer, index)
+			g.inputBuffer.DiscardUntil(index)
 			g.inputBufferLock.Unlock()
 
 		case 1: // state
@@ -196,11 +174,7 @@ func (g *Game) Update() error {
 	}
 
 	g.inputBufferLock.Lock()
-	g.inputBuffer = append(g.inputBuffer, inputWithIndex{
-		index: g.lastInputIndex,
-		Input: input,
-	})
-	g.lastInputIndex++
+	g.inputBuffer.Append(input)
 	g.inputBufferLock.Unlock()
 
 	g.snapshotLock.Lock()
