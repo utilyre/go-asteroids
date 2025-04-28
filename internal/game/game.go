@@ -77,15 +77,16 @@ func (g *Game) sendLoop() {
 		ctx, cancel := context.WithTimeout(ctx, time.Second/30)
 
 		g.inputBufferLock.Lock()
-		data := make([]byte, len(g.inputBuffer)*(4+state.InputSize))
+		data := make([]byte, 4+len(g.inputBuffer)*(4+state.InputSize))
+		binary.BigEndian.PutUint32(data, uint32(len(g.inputBuffer)))
 		for i, input := range g.inputBuffer {
 			b, err := input.MarshalBinary()
 			if err != nil {
 				slog.Warn("failed to marshal input", "error", err)
 				continue
 			}
-			binary.BigEndian.PutUint32(data[i*(4+state.InputSize):], input.index)
-			copy(data[i*(4+state.InputSize)+4:], b)
+			binary.BigEndian.PutUint32(data[4+i*(4+state.InputSize):], input.index)
+			copy(data[4+i*(4+state.InputSize)+4:], b)
 		}
 		g.inputBufferLock.Unlock()
 
