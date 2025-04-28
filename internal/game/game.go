@@ -27,16 +27,18 @@ type inputWithIndex struct {
 }
 
 type Game struct {
-	houseImg        *ebiten.Image
-	sess            *mcp.Session
-	lastInputIndex  uint32
+	houseImg *ebiten.Image
+	sess     *mcp.Session
+
 	inputBuffer     []inputWithIndex
 	inputBufferLock sync.Mutex
-	state           state.State
-	lastStateIndex  uint32
-	prevSnapshot    snapshot
-	nextSnapshot    snapshot
-	snapshotLock    sync.Mutex
+	lastInputIndex  uint32
+
+	state          state.State
+	prevSnapshot   snapshot
+	nextSnapshot   snapshot
+	lastStateIndex uint32
+	snapshotLock   sync.Mutex
 }
 
 func New(ctx context.Context, raddr string) (*Game, error) {
