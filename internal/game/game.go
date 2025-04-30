@@ -64,12 +64,9 @@ func New(ctx context.Context, raddr string) (*Game, error) {
 }
 
 func (g *Game) sendLoop() {
-	ctx := context.Background()
 	ticker := time.NewTicker(time.Second / 30)
 	defer ticker.Stop()
 	for ; ; <-ticker.C {
-		ctx, cancel := context.WithTimeout(ctx, time.Second/30)
-
 		g.inputBufferLock.Lock()
 		data, err := g.inputBuffer.MarshalBinary()
 		g.inputBufferLock.Unlock()
@@ -78,12 +75,7 @@ func (g *Game) sendLoop() {
 			continue
 		}
 
-		err = g.sess.Send(ctx, data)
-		cancel()
-		if err != nil {
-			slog.Warn("failed to send input", "error", err)
-			continue
-		}
+		_ = g.sess.TrySend(data)
 	}
 }
 
