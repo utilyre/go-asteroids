@@ -6,6 +6,7 @@ import (
 	"errors"
 	"image"
 	"log/slog"
+	"multiplayer/internal/jitter"
 	"multiplayer/internal/mcp"
 	"multiplayer/internal/state"
 	"os"
@@ -18,8 +19,8 @@ import (
 type Simulation struct {
 	houseImg       *ebiten.Image
 	ln             *mcp.Listener
-	sessions       map[string]*mcp.Session
-	sessionLock    sync.Mutex
+	clients        map[string]clientType
+	clientLock     sync.Mutex
 	state          state.State
 	lastStateIndex uint32
 }
@@ -39,13 +40,51 @@ func New(ctx context.Context, laddr string) (*Simulation, error) {
 	sim := &Simulation{
 		houseImg:       ebiten.NewImageFromImage(houseImg),
 		ln:             ln,
-		sessions:       map[string]*mcp.Session{},
-		sessionLock:    sync.Mutex{},
+		clients:        map[string]clientType{},
+		clientLock:     sync.Mutex{},
 		state:          state.State{},
 		lastStateIndex: 0,
 	}
 	go sim.acceptLoop()
 	return sim, nil
+}
+
+type clientType struct {
+	sess   *mcp.Session
+	inputc chan state.Input
+}
+
+func (c clientType) start() {
+	logger := slog.With("remote", c.sess.RemoteAddr())
+
+	// TODO: plan for killing this infinite loop
+	for {
+		data, succeeded := c.sess.TryReceive()
+		if !succeeded {
+			continue
+		}
+
+		var buf jitter.Buffer
+		err := buf.UnmarshalBinary(data)
+		if err != nil {
+			logger.Warn("failed to unmarshal inputs", "error", err)
+			continue
+		}
+
+		if indices := buf.Indices(); len(indices) > 0 {
+			b := make([]byte, 2+4)
+			binary.BigEndian.PutUint16(b, 0 /* type = input ack */)
+			binary.BigEndian.PutUint32(b[2:], indices[len(indices)-1])
+			_ = c.sess.TrySend(b)
+		}
+
+		for _, input := range buf.Inputs() {
+			select {
+			case c.inputc <- input:
+			default:
+			}
+		}
+	}
 }
 
 func (sim *Simulation) acceptLoop() {
@@ -62,9 +101,15 @@ func (sim *Simulation) acceptLoop() {
 
 		// TODO: remove sess from sessions whenever closed
 
-		sim.sessionLock.Lock()
-		sim.sessions[sess.RemoteAddr().String()] = sess
-		sim.sessionLock.Unlock()
+		client := clientType{
+			sess:   sess,
+			inputc: make(chan state.Input, 1),
+		}
+		go client.start()
+
+		sim.clientLock.Lock()
+		sim.clients[sess.RemoteAddr().String()] = client
+		sim.clientLock.Unlock()
 	}
 }
 
@@ -105,37 +150,32 @@ func (sim *Simulation) Update() error {
 	ctx, cancel := context.WithTimeout(context.Background(), dt)
 	defer cancel()
 
-	// collect data and then process it to reduce the duration at which the
+	// collect inputs and then process them to reduce the duration at which the
 	// lock is held.
-	var inputDatas [][]byte
-	sim.sessionLock.Lock()
-	for _, sess := range sim.sessions {
-		data, succeeded := sess.TryReceive()
-		if !succeeded {
-			continue
+	var inputs []state.Input
+	sim.clientLock.Lock()
+	for _, client := range sim.clients {
+		select {
+		case input := <-client.inputc:
+			inputs = append(inputs, input)
+		default:
 		}
-		inputDatas = append(inputDatas, data)
 	}
-	sim.sessionLock.Unlock()
+	sim.clientLock.Unlock()
 
-	for _, data := range inputDatas {
-		var input state.Input
-		err := input.UnmarshalBinary(data)
-		if err != nil {
-			slog.Warn("failed to unmarshal input", "error", err)
-			return nil
-		}
+	for _, input := range inputs {
 		sim.state.Update(dt, input)
 	}
 
-	data := make([]byte, 4+state.StateSize)
-	binary.BigEndian.PutUint32(data, sim.lastStateIndex)
+	data := make([]byte, 2+4+state.StateSize)
+	binary.BigEndian.PutUint16(data, 1 /* type = state */)
+	binary.BigEndian.PutUint32(data[2:], sim.lastStateIndex)
 	stateData, err := sim.state.MarshalBinary()
 	if err != nil {
 		slog.Warn("failed to marshal state", "error", err)
 		return nil
 	}
-	copy(data[4:], stateData)
+	copy(data[6:], stateData)
 	err = sim.ln.Broadcast(ctx, data)
 	if errors.Is(err, mcp.ErrClosed) {
 		return ebiten.Termination
