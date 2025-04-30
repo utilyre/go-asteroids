@@ -2,7 +2,7 @@
 
 > [!WARNING]
 >
-> This repository is a WIP and subject to ongoing updates.
+> This repository is a work-in-progress and subject to ongoing updates.
 
 Multiplayer online game from scratch.
 
