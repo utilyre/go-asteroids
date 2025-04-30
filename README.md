@@ -1,3 +1,5 @@
+![showcase](./showcase.png)
+
 # Multiplayer
 
 > [!WARNING]
