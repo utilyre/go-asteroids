@@ -155,11 +155,6 @@ func (g *Game) Draw(screen *ebiten.Image) {
 }
 
 func (g *Game) Update() error {
-	/* dt := time.Second / time.Duration(ebiten.TPS())
-
-	ctx, cancel := context.WithTimeout(context.Background(), dt)
-	defer cancel() */
-
 	input := state.Input{
 		Left:  ebiten.IsKeyPressed(ebiten.KeyH),
 		Down:  ebiten.IsKeyPressed(ebiten.KeyJ),
