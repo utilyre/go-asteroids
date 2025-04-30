@@ -57,8 +57,11 @@ type clientType struct {
 func (c clientType) start() {
 	logger := slog.With("remote", c.sess.RemoteAddr())
 
+	// TODO: this is a temporary fix for the busy-loop performance issue
+	ticker := time.NewTicker(time.Second / 10)
+	defer ticker.Stop()
 	// TODO: plan for killing this infinite loop
-	for {
+	for ; ; <-ticker.C {
 		data, succeeded := c.sess.TryReceive()
 		if !succeeded {
 			continue
