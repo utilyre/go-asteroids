@@ -7,6 +7,7 @@ import (
 	"image"
 	_ "image/png"
 	"log/slog"
+	"multiplayer/internal/jitter"
 	"multiplayer/internal/mcp"
 	"multiplayer/internal/state"
 	"os"
@@ -22,12 +23,16 @@ type snapshot struct {
 }
 
 type Game struct {
-	houseImg       *ebiten.Image
-	sess           *mcp.Session
+	houseImg *ebiten.Image
+	sess     *mcp.Session
+
+	inputBuffer     jitter.Buffer
+	inputBufferLock sync.Mutex
+
 	state          state.State
-	lastStateIndex uint32
 	prevSnapshot   snapshot
 	nextSnapshot   snapshot
+	lastStateIndex uint32
 	snapshotLock   sync.Mutex
 }
 
@@ -43,19 +48,38 @@ func New(ctx context.Context, raddr string) (*Game, error) {
 	}
 
 	g := &Game{
-		houseImg:       ebiten.NewImageFromImage(houseImg),
-		sess:           sess,
-		state:          state.State{},
-		lastStateIndex: 0,
-		prevSnapshot:   snapshot{},
-		nextSnapshot:   snapshot{},
-		snapshotLock:   sync.Mutex{},
+		houseImg:        ebiten.NewImageFromImage(houseImg),
+		sess:            sess,
+		inputBuffer:     jitter.Buffer{},
+		inputBufferLock: sync.Mutex{},
+		state:           state.State{},
+		lastStateIndex:  0,
+		prevSnapshot:    snapshot{},
+		nextSnapshot:    snapshot{},
+		snapshotLock:    sync.Mutex{},
 	}
-	go g.snapshotLoop()
+	go g.sendLoop()
+	go g.receiveLoop()
 	return g, nil
 }
 
-func (g *Game) snapshotLoop() {
+func (g *Game) sendLoop() {
+	ticker := time.NewTicker(time.Second / time.Duration(ebiten.TPS()))
+	defer ticker.Stop()
+	for ; ; <-ticker.C {
+		g.inputBufferLock.Lock()
+		data, err := g.inputBuffer.MarshalBinary()
+		g.inputBufferLock.Unlock()
+		if err != nil {
+			slog.Warn("failed to marshal input buffer", "error", err)
+			continue
+		}
+
+		_ = g.sess.TrySend(data)
+	}
+}
+
+func (g *Game) receiveLoop() {
 	ctx := context.Background()
 	for {
 		data, err := g.sess.Receive(ctx)
@@ -66,29 +90,50 @@ func (g *Game) snapshotLoop() {
 			slog.Warn("failed to receive state", "error", err)
 			continue
 		}
-		if len(data) < 4 {
-			slog.Warn("state data is smaller than uint32", "length", len(data))
-			continue
-		}
-		index := binary.BigEndian.Uint32(data)
-		if index <= g.lastStateIndex {
+		if len(data) < 2 {
+			slog.Warn("received data does not contain type")
 			continue
 		}
 
-		var s state.State
-		err = s.UnmarshalBinary(data[4:])
-		if err != nil {
-			slog.Warn("failed to unmarshal state", "error", err)
-			continue
+		// TODO: this is stupid, come up with an actual protocol
+		typ := binary.BigEndian.Uint16(data)
+		data = data[2:]
+		switch typ {
+		case 0: // input ack
+			if l := len(data); l < 4 {
+				slog.Warn("input acknowledgement is smaller than uint32", "length", l)
+				continue
+			}
+			index := binary.BigEndian.Uint32(data)
+			g.inputBufferLock.Lock()
+			g.inputBuffer.DiscardUntil(index)
+			g.inputBufferLock.Unlock()
+
+		case 1: // state
+			if len(data) < 4 {
+				slog.Warn("state data is smaller than uint32", "length", len(data))
+				continue
+			}
+			index := binary.BigEndian.Uint32(data)
+			if index <= g.lastStateIndex {
+				continue
+			}
+
+			var s state.State
+			err = s.UnmarshalBinary(data[4:])
+			if err != nil {
+				slog.Warn("failed to unmarshal state", "error", err)
+				continue
+			}
+			g.snapshotLock.Lock()
+			g.prevSnapshot = g.nextSnapshot
+			g.nextSnapshot = snapshot{
+				s: s,
+				t: time.Now(),
+			}
+			g.snapshotLock.Unlock()
+			g.lastStateIndex = index
 		}
-		g.snapshotLock.Lock()
-		g.prevSnapshot = g.nextSnapshot
-		g.nextSnapshot = snapshot{
-			s: s,
-			t: time.Now(),
-		}
-		g.snapshotLock.Unlock()
-		g.lastStateIndex = index
 	}
 }
 
@@ -110,11 +155,6 @@ func (g *Game) Draw(screen *ebiten.Image) {
 }
 
 func (g *Game) Update() error {
-	dt := time.Second / time.Duration(ebiten.TPS())
-
-	ctx, cancel := context.WithTimeout(context.Background(), dt)
-	defer cancel()
-
 	input := state.Input{
 		Left:  ebiten.IsKeyPressed(ebiten.KeyH),
 		Down:  ebiten.IsKeyPressed(ebiten.KeyJ),
@@ -122,23 +162,9 @@ func (g *Game) Update() error {
 		Right: ebiten.IsKeyPressed(ebiten.KeyL),
 	}
 
-	// TODO: use a buffer for sending inputs to ensure order and reliability
-	data, err := input.MarshalBinary()
-	if err != nil {
-		slog.Warn("failed to marshal input", "error", err)
-		return nil
-	}
-	err = g.sess.Send(ctx, data)
-	if errors.Is(err, mcp.ErrClosed) {
-		return ebiten.Termination
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return nil
-	}
-	if err != nil {
-		slog.Warn("failed to send input", "error", err)
-		return nil
-	}
+	g.inputBufferLock.Lock()
+	g.inputBuffer.Append(input)
+	g.inputBufferLock.Unlock()
 
 	g.snapshotLock.Lock()
 	if !g.nextSnapshot.t.IsZero() {
