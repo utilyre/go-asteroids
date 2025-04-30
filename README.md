@@ -37,6 +37,8 @@ Multiplayer online game from scratch.
 
 ## Resources
 
+I have used the following materials during the development of this project.
+
 - [Networked Physics](https://gafferongames.com/categories/networked-physics)
 - [Sneaky Race Conditions and Granular Locks](https://blogtitle.github.io/sneaky-race-conditions-and-granular-locks)
 - [Network Programming with Go](https://www.amazon.com/Network-Programming-Go-Adam-Woodbeck/dp/1718500882)
