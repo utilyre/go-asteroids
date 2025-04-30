@@ -103,7 +103,9 @@ func (g *Game) receiveLoop() {
 			continue
 		}
 
+		// TODO: this is stupid, come up with an actual protocol
 		typ := binary.BigEndian.Uint16(data)
+		data = data[2:]
 		switch typ {
 		case 0: // input ack
 			if l := len(data); l < 4 {
