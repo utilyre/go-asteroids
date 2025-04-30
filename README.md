@@ -1,4 +1,4 @@
-> [!WARN]
+> [!WARNING]
 >
 > This repository is a WIP and subject to ongoing updates.
 
