@@ -1,8 +1,8 @@
+# Multiplayer
+
 > [!WARNING]
 >
 > This repository is a WIP and subject to ongoing updates.
-
-# Multiplayer
 
 Multiplayer online game from scratch.
 
