@@ -26,8 +26,8 @@ Multiplayer online game from scratch.
 	 ```
 
 3. In the following command, replace `<n>` with the number of clients you would
-   like to spawn. Also, paste what you copied from the previous step and then
-   execute this command.
+   like to spawn. Also, paste what you copied from the previous step, replacing
+   `[ADDRESS]`, and then execute it.
 
    ```bash
    ./spawn_clients.sh <n> -remote=[ADDRESS]
