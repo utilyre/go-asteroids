@@ -10,24 +10,22 @@ Multiplayer online game from scratch.
 
 1. [Install ebitengine dependencies][ebitengine_install].
 
-2. Run the server:
+2. Run the server.
 
    ```bash
    go run ./cmd/server
    ```
 
-3. In the server logs, there will be a line similar to the one below that
-   telling you what address the server is bound to:
+3. In the server logs, there will be a line similar to the one below. Copy the
+   text that is in the place of `[ADDRESS]` for the next step.
 
    ```
 	 11:10:53 INF bound udp/mcp listener address=[ADDRESS]
 	 ```
 
-	 Take note of `[ADDRESS]`.
-
-3. Run the following. Replace `<n>` with the number of clients you'd like to
-   run and also replace `[ADDRESS]` with the one you took note of in the
-   previous step.
+3. In the following command, replace `<n>` with the number of clients you would
+   like to spawn. Also, paste what you copied from the previous step and then
+   execute this command.
 
    ```bash
    ./spawn_clients.sh <n> -remote=[ADDRESS]
