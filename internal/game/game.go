@@ -64,7 +64,7 @@ func New(ctx context.Context, raddr string) (*Game, error) {
 }
 
 func (g *Game) sendLoop() {
-	ticker := time.NewTicker(time.Second / 30)
+	ticker := time.NewTicker(time.Second / time.Duration(ebiten.TPS()))
 	defer ticker.Stop()
 	for ; ; <-ticker.C {
 		g.inputBufferLock.Lock()

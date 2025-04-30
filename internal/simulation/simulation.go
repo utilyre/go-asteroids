@@ -58,7 +58,7 @@ func (c clientType) start() {
 	logger := slog.With("remote", c.sess.RemoteAddr())
 
 	// TODO: this is a temporary fix for the busy-loop performance issue
-	ticker := time.NewTicker(time.Second / 10)
+	ticker := time.NewTicker(time.Second / time.Duration(ebiten.TPS()))
 	defer ticker.Stop()
 	// TODO: plan for killing this infinite loop
 	for ; ; <-ticker.C {
