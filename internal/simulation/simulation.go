@@ -59,7 +59,7 @@ func (c clientType) start(ctx context.Context) {
 
 	for {
 		data, err := c.sess.Receive(ctx)
-		if errors.Is(err, mcp.ErrClosed) {
+		if errors.Is(err, mcp.ErrClosed) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			break
 		}
 		if err != nil {
@@ -94,7 +94,7 @@ func (c clientType) start(ctx context.Context) {
 func (sim *Simulation) acceptLoop(ctx context.Context) {
 	for {
 		sess, err := sim.ln.Accept(ctx)
-		if errors.Is(err, mcp.ErrClosed) {
+		if errors.Is(err, mcp.ErrClosed) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			break
 		}
 		if err != nil {
