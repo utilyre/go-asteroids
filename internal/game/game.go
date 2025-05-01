@@ -58,15 +58,14 @@ func New(ctx context.Context, raddr string) (*Game, error) {
 		nextSnapshot:    snapshot{},
 		snapshotLock:    sync.Mutex{},
 	}
-	go g.receiveLoop()
+	go g.receiveLoop(context.Background())
 	return g, nil
 }
 
-func (g *Game) receiveLoop() {
-	ctx := context.Background()
+func (g *Game) receiveLoop(ctx context.Context) {
 	for {
 		data, err := g.sess.Receive(ctx)
-		if errors.Is(err, mcp.ErrClosed) {
+		if errors.Is(err, mcp.ErrClosed) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			break
 		}
 		if err != nil {
