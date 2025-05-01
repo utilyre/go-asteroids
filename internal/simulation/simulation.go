@@ -54,21 +54,21 @@ type clientType struct {
 	inputc chan state.Input
 }
 
-func (c clientType) start() {
+func (c clientType) start(ctx context.Context) {
 	logger := slog.With("remote", c.sess.RemoteAddr())
 
-	// TODO: this is a temporary fix for the busy-loop performance issue
-	ticker := time.NewTicker(time.Second / time.Duration(ebiten.TPS()))
-	defer ticker.Stop()
-	// TODO: plan for killing this infinite loop
-	for ; ; <-ticker.C {
-		data, succeeded := c.sess.TryReceive()
-		if !succeeded {
+	for {
+		data, err := c.sess.Receive(ctx)
+		if errors.Is(err, mcp.ErrClosed) {
+			break
+		}
+		if err != nil {
+			logger.Warn("failed to receive inputs from session", "error", err)
 			continue
 		}
 
 		var buf jitter.Buffer
-		err := buf.UnmarshalBinary(data)
+		err = buf.UnmarshalBinary(data)
 		if err != nil {
 			logger.Warn("failed to unmarshal inputs", "error", err)
 			continue
@@ -78,6 +78,7 @@ func (c clientType) start() {
 			b := make([]byte, 2+4)
 			binary.BigEndian.PutUint16(b, 0 /* type = input ack */)
 			binary.BigEndian.PutUint32(b[2:], indices[len(indices)-1])
+			// i refuse to spawn a new goroutine just to do this
 			_ = c.sess.TrySend(b)
 		}
 
@@ -108,7 +109,7 @@ func (sim *Simulation) acceptLoop() {
 		}
 		raddr := sess.RemoteAddr().String()
 		go func() {
-			client.start()
+			client.start(context.Background())
 
 			// should not sess.Close() since the only reason client.start()
 			// returns is because sess has closed.
