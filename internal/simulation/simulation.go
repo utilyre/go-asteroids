@@ -25,7 +25,7 @@ type Simulation struct {
 	lastStateIndex uint32
 }
 
-func New(ctx context.Context, laddr string) (*Simulation, error) {
+func New(laddr string) (*Simulation, error) {
 	houseImg, err := openImage("./assets/house.png")
 	if err != nil {
 		return nil, err

@@ -22,7 +22,7 @@ func main() {
 	ctx, cancel := cli.NewSignalContext()
 	defer cancel()
 
-	sim, err := simulation.New(ctx, localAddr)
+	sim, err := simulation.New(localAddr)
 	if err != nil {
 		slog.Error("failed to instantiate simulation", "error", err)
 		return
