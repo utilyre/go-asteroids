@@ -45,7 +45,7 @@ func New(ctx context.Context, laddr string) (*Simulation, error) {
 		state:          state.State{},
 		lastStateIndex: 0,
 	}
-	go sim.acceptLoop()
+	go sim.acceptLoop(context.Background())
 	return sim, nil
 }
 
@@ -91,8 +91,7 @@ func (c clientType) start(ctx context.Context) {
 	}
 }
 
-func (sim *Simulation) acceptLoop() {
-	ctx := context.Background()
+func (sim *Simulation) acceptLoop(ctx context.Context) {
 	for {
 		sess, err := sim.ln.Accept(ctx)
 		if errors.Is(err, mcp.ErrClosed) {
