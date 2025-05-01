@@ -102,16 +102,24 @@ func (sim *Simulation) acceptLoop() {
 			continue
 		}
 
-		// TODO: remove sess from sessions whenever closed
-
 		client := clientType{
 			sess:   sess,
 			inputc: make(chan state.Input, 1),
 		}
-		go client.start()
+		raddr := sess.RemoteAddr().String()
+		go func() {
+			client.start()
+
+			// should not sess.Close() since the only reason client.start()
+			// returns is because sess has closed.
+
+			sim.clientLock.Lock()
+			delete(sim.clients, raddr)
+			sim.clientLock.Unlock()
+		}()
 
 		sim.clientLock.Lock()
-		sim.clients[sess.RemoteAddr().String()] = client
+		sim.clients[raddr] = client
 		sim.clientLock.Unlock()
 	}
 }
