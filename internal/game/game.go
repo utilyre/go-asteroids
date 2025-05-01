@@ -58,32 +58,14 @@ func New(ctx context.Context, raddr string) (*Game, error) {
 		nextSnapshot:    snapshot{},
 		snapshotLock:    sync.Mutex{},
 	}
-	go g.sendLoop()
-	go g.receiveLoop()
+	go g.receiveLoop(context.Background())
 	return g, nil
 }
 
-func (g *Game) sendLoop() {
-	ticker := time.NewTicker(time.Second / time.Duration(ebiten.TPS()))
-	defer ticker.Stop()
-	for ; ; <-ticker.C {
-		g.inputBufferLock.Lock()
-		data, err := g.inputBuffer.MarshalBinary()
-		g.inputBufferLock.Unlock()
-		if err != nil {
-			slog.Warn("failed to marshal input buffer", "error", err)
-			continue
-		}
-
-		_ = g.sess.TrySend(data)
-	}
-}
-
-func (g *Game) receiveLoop() {
-	ctx := context.Background()
+func (g *Game) receiveLoop(ctx context.Context) {
 	for {
 		data, err := g.sess.Receive(ctx)
-		if errors.Is(err, mcp.ErrClosed) {
+		if errors.Is(err, mcp.ErrClosed) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			break
 		}
 		if err != nil {
@@ -164,7 +146,16 @@ func (g *Game) Update() error {
 
 	g.inputBufferLock.Lock()
 	g.inputBuffer.Append(input)
+	data, err := g.inputBuffer.MarshalBinary()
 	g.inputBufferLock.Unlock()
+	if err != nil {
+		slog.Warn("failed to marshal input buffer", "error", err)
+		return nil
+	}
+	if g.sess.Closed() {
+		return ebiten.Termination
+	}
+	_ = g.sess.TrySend(data)
 
 	g.snapshotLock.Lock()
 	if !g.nextSnapshot.t.IsZero() {

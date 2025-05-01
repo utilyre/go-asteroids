@@ -25,7 +25,7 @@ type Simulation struct {
 	lastStateIndex uint32
 }
 
-func New(ctx context.Context, laddr string) (*Simulation, error) {
+func New(laddr string) (*Simulation, error) {
 	houseImg, err := openImage("./assets/house.png")
 	if err != nil {
 		return nil, err
@@ -45,7 +45,7 @@ func New(ctx context.Context, laddr string) (*Simulation, error) {
 		state:          state.State{},
 		lastStateIndex: 0,
 	}
-	go sim.acceptLoop()
+	go sim.acceptLoop(context.Background())
 	return sim, nil
 }
 
@@ -54,21 +54,21 @@ type clientType struct {
 	inputc chan state.Input
 }
 
-func (c clientType) start() {
+func (c clientType) start(ctx context.Context) {
 	logger := slog.With("remote", c.sess.RemoteAddr())
 
-	// TODO: this is a temporary fix for the busy-loop performance issue
-	ticker := time.NewTicker(time.Second / time.Duration(ebiten.TPS()))
-	defer ticker.Stop()
-	// TODO: plan for killing this infinite loop
-	for ; ; <-ticker.C {
-		data, succeeded := c.sess.TryReceive()
-		if !succeeded {
+	for {
+		data, err := c.sess.Receive(ctx)
+		if errors.Is(err, mcp.ErrClosed) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			break
+		}
+		if err != nil {
+			logger.Warn("failed to receive inputs from session", "error", err)
 			continue
 		}
 
 		var buf jitter.Buffer
-		err := buf.UnmarshalBinary(data)
+		err = buf.UnmarshalBinary(data)
 		if err != nil {
 			logger.Warn("failed to unmarshal inputs", "error", err)
 			continue
@@ -78,6 +78,7 @@ func (c clientType) start() {
 			b := make([]byte, 2+4)
 			binary.BigEndian.PutUint16(b, 0 /* type = input ack */)
 			binary.BigEndian.PutUint32(b[2:], indices[len(indices)-1])
+			// i refuse to spawn a new goroutine just to do this
 			_ = c.sess.TrySend(b)
 		}
 
@@ -90,11 +91,10 @@ func (c clientType) start() {
 	}
 }
 
-func (sim *Simulation) acceptLoop() {
-	ctx := context.Background()
+func (sim *Simulation) acceptLoop(ctx context.Context) {
 	for {
 		sess, err := sim.ln.Accept(ctx)
-		if errors.Is(err, mcp.ErrClosed) {
+		if errors.Is(err, mcp.ErrClosed) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			break
 		}
 		if err != nil {
@@ -102,16 +102,24 @@ func (sim *Simulation) acceptLoop() {
 			continue
 		}
 
-		// TODO: remove sess from sessions whenever closed
-
 		client := clientType{
 			sess:   sess,
 			inputc: make(chan state.Input, 1),
 		}
-		go client.start()
+		raddr := sess.RemoteAddr().String()
+		go func() {
+			client.start(context.Background())
+
+			// should not sess.Close() since the only reason client.start()
+			// returns is because sess has closed.
+
+			sim.clientLock.Lock()
+			delete(sim.clients, raddr)
+			sim.clientLock.Unlock()
+		}()
 
 		sim.clientLock.Lock()
-		sim.clients[sess.RemoteAddr().String()] = client
+		sim.clients[raddr] = client
 		sim.clientLock.Unlock()
 	}
 }

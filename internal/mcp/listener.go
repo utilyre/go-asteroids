@@ -334,7 +334,7 @@ func (ln *Listener) readLoop() {
 			continue
 		}
 
-		err = ln.handleDatagram(remote, datagram)
+		err = ln.handleDatagram(context.Background(), remote, datagram)
 		if err != nil {
 			ln.logger.Warn("failed to handle datagram", "error", err)
 			continue
@@ -347,7 +347,7 @@ func (ln *Listener) readLoop() {
 	}
 }
 
-func (ln *Listener) handleDatagram(remote net.Addr, datagram Datagram) error {
+func (ln *Listener) handleDatagram(ctx context.Context, remote net.Addr, datagram Datagram) error {
 	if datagram.Version != version {
 		return fmt.Errorf("version %d: version is not supported", datagram.Version)
 	}
@@ -380,7 +380,7 @@ func (ln *Listener) handleDatagram(remote net.Addr, datagram Datagram) error {
 		sess := ln.sessions[remote.String()]
 		var err error
 		sess.dieOnce.Do(func() {
-			err = sess.partialUncheckedClose(context.TODO())
+			err = sess.partialUncheckedClose(ctx)
 		})
 		if err != nil {
 			ln.sessionCond.L.Unlock()
@@ -557,6 +557,15 @@ func (sess *Session) Close(ctx context.Context) error {
 		return ErrClosed
 	}
 	return err
+}
+
+func (sess *Session) Closed() bool {
+	select {
+	case _, open := <-sess.die:
+		return !open
+	default:
+		return false
+	}
 }
 
 func (sess *Session) LocalAddr() net.Addr {
