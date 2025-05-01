@@ -12,27 +12,29 @@ var ErrShortData = errors.New("short data")
 
 const InputSize = 1
 
+// A zero valued input does not manipulate the state.
 type Input struct {
 	Left, Down, Up, Right bool
 }
 
-// A zero valued input does not manipulate the state.
-func (s *State) Update(delta time.Duration, input Input) {
+func (s *State) Update(delta time.Duration, inputs []Input) {
 	const houseAccel = 300
 	dt := delta.Seconds()
 
 	var v Vec2
-	if input.Left {
-		v.X -= 1
-	}
-	if input.Down {
-		v.Y += 1
-	}
-	if input.Up {
-		v.Y -= 1
-	}
-	if input.Right {
-		v.X += 1
+	for _, input := range inputs {
+		if input.Left {
+			v.X -= 1
+		}
+		if input.Down {
+			v.Y += 1
+		}
+		if input.Up {
+			v.Y -= 1
+		}
+		if input.Right {
+			v.X += 1
+		}
 	}
 
 	s.House.Accel = v.Normalize().Mul(houseAccel)

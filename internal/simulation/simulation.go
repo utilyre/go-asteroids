@@ -153,8 +153,6 @@ func (sim *Simulation) Update() error {
 	ctx, cancel := context.WithTimeout(context.Background(), dt)
 	defer cancel()
 
-	// collect inputs and then process them to reduce the duration at which the
-	// lock is held.
 	var inputs []state.Input
 	sim.clientLock.Lock()
 	for _, client := range sim.clients {
@@ -166,9 +164,7 @@ func (sim *Simulation) Update() error {
 	}
 	sim.clientLock.Unlock()
 
-	for _, input := range inputs {
-		sim.state.Update(dt, input)
-	}
+	sim.state.Update(dt, inputs)
 
 	data := make([]byte, 2+4+state.StateSize)
 	binary.BigEndian.PutUint16(data, 1 /* type = state */)
