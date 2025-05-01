@@ -153,6 +153,9 @@ func (g *Game) Update() error {
 		slog.Warn("failed to marshal input buffer", "error", err)
 		return nil
 	}
+	if g.sess.Closed() {
+		return ebiten.Termination
+	}
 	_ = g.sess.TrySend(data)
 
 	g.snapshotLock.Lock()
