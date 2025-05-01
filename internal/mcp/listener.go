@@ -559,6 +559,15 @@ func (sess *Session) Close(ctx context.Context) error {
 	return err
 }
 
+func (sess *Session) Closed() bool {
+	select {
+	case _, open := <-sess.die:
+		return !open
+	default:
+		return false
+	}
+}
+
 func (sess *Session) LocalAddr() net.Addr {
 	return sess.local
 }
