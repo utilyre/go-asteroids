@@ -58,25 +58,8 @@ func New(ctx context.Context, raddr string) (*Game, error) {
 		nextSnapshot:    snapshot{},
 		snapshotLock:    sync.Mutex{},
 	}
-	go g.sendLoop()
 	go g.receiveLoop()
 	return g, nil
-}
-
-func (g *Game) sendLoop() {
-	ticker := time.NewTicker(time.Second / time.Duration(ebiten.TPS()))
-	defer ticker.Stop()
-	for ; ; <-ticker.C {
-		g.inputBufferLock.Lock()
-		data, err := g.inputBuffer.MarshalBinary()
-		g.inputBufferLock.Unlock()
-		if err != nil {
-			slog.Warn("failed to marshal input buffer", "error", err)
-			continue
-		}
-
-		_ = g.sess.TrySend(data)
-	}
 }
 
 func (g *Game) receiveLoop() {
@@ -164,7 +147,13 @@ func (g *Game) Update() error {
 
 	g.inputBufferLock.Lock()
 	g.inputBuffer.Append(input)
+	data, err := g.inputBuffer.MarshalBinary()
 	g.inputBufferLock.Unlock()
+	if err != nil {
+		slog.Warn("failed to marshal input buffer", "error", err)
+		return nil
+	}
+	_ = g.sess.TrySend(data)
 
 	g.snapshotLock.Lock()
 	if !g.nextSnapshot.t.IsZero() {
