@@ -20,6 +20,7 @@ import (
 var (
 	ErrClosed       = errors.New("use of closed network connection")
 	ErrNegativeSize = errors.New("provision of negative value as size")
+	ErrNilValue     = errors.New("provision of nil value")
 )
 
 const version byte = 1
@@ -57,9 +58,10 @@ func (ln *Listener) LocalAddr() net.Addr {
 type Option func(opts *options) error
 
 type options struct {
-	dial     bool
-	dataSize int
-	logger   *slog.Logger
+	dial       bool
+	dataSize   int
+	logger     *slog.Logger
+	listenFunc func(laddr string) (net.PacketConn, error)
 }
 
 func WithDataSize(dataSize int) Option {
@@ -87,11 +89,25 @@ func withDial(dial bool) Option {
 	}
 }
 
+func WithListenFunc(listenFunc func(laddr string) (net.PacketConn, error)) Option {
+	return func(opts *options) error {
+		if listenFunc == nil {
+			return fmt.Errorf("listenFunc: %w", ErrNilValue)
+		}
+
+		opts.listenFunc = listenFunc
+		return nil
+	}
+}
+
 func Listen(laddr string, opts ...Option) (*Listener, error) {
 	o := options{
 		dial:     false,
 		dataSize: 512 - headerSize, // avoid fragmentation
 		logger:   slog.New(slog.DiscardHandler),
+		listenFunc: func(laddr string) (net.PacketConn, error) {
+			return net.ListenPacket("udp", laddr)
+		},
 	}
 	var optErrs []error
 	for _, opt := range opts {
@@ -101,7 +117,7 @@ func Listen(laddr string, opts ...Option) (*Listener, error) {
 		return nil, err
 	}
 
-	conn, err := net.ListenPacket("udp", laddr)
+	conn, err := o.listenFunc(laddr)
 	if err != nil {
 		return nil, err
 	}
