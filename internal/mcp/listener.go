@@ -152,17 +152,7 @@ func Dial(ctx context.Context, raddr string, opts ...Option) (*Session, error) {
 		return nil, err
 	}
 
-	datagram := Datagram{
-		Version: version,
-		Flags:   flagJoin,
-		Data:    nil,
-	}
-	b, err := datagram.MarshalBinary()
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = writeToWithContext(ctx, ln.logger, ln.conn, b, remote)
+	err = ln.sendFlags(ctx, remote, flagJoin)
 	if err != nil {
 		return nil, err
 	}
@@ -180,23 +170,17 @@ func Dial(ctx context.Context, raddr string, opts ...Option) (*Session, error) {
 	return sess, nil
 }
 
-// please note that the context will affect all the writes happening at the
-// time of this function running.
-func writeToWithContext(
-	ctx context.Context,
-	logger *slog.Logger,
-	conn net.PacketConn,
-	b []byte,
-	remote net.Addr,
-) (n int, err error) {
+// Please note that ctx affects all simultaneous write calls on ln.conn at the
+// execution time of sendFlags.
+func (ln *Listener) sendFlags(ctx context.Context, remote net.Addr, flags uint16) (err error) {
 	if deadline, ok := ctx.Deadline(); ok {
-		err := conn.SetWriteDeadline(deadline)
+		err := ln.conn.SetWriteDeadline(deadline)
 		if err != nil {
-			return 0, err
+			return err
 		}
 	}
 	defer func() { // runs after local done channel is closed
-		err = errors.Join(err, conn.SetWriteDeadline(time.Time{}))
+		err = errors.Join(err, ln.conn.SetWriteDeadline(time.Time{}))
 	}()
 
 	done := make(chan struct{})
@@ -205,23 +189,29 @@ func writeToWithContext(
 		select {
 		case <-done:
 		case <-ctx.Done():
-			err := conn.SetWriteDeadline(time.Now())
+			err := ln.conn.SetWriteDeadline(time.Now())
 			if err != nil {
-				logger.WarnContext(ctx, "failed to cancel write",
+				ln.logger.WarnContext(ctx, "failed to cancel write",
 					"raddr", remote,
 					"error", err)
 			}
 		}
 	}()
 
-	n, err = conn.WriteTo(b, remote)
-	if errors.Is(err, os.ErrDeadlineExceeded) {
-		return 0, ctx.Err()
+	dg := Datagram{
+		Version: version,
+		Flags:   flags,
 	}
+	data, err := dg.MarshalBinary()
 	if err != nil {
-		return 0, err
+		return err
 	}
-	return n, nil
+
+	_, err = ln.conn.WriteTo(data, remote)
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return ctx.Err()
+	}
+	return err
 }
 
 func (ln *Listener) Accept(ctx context.Context) (*Session, error) {
@@ -525,16 +515,7 @@ func (sess *Session) TrySend(data []byte) bool {
 }
 
 func (sess *Session) sendLeave(ctx context.Context) error {
-	datagram := Datagram{
-		Version: version,
-		Flags:   flagLeave,
-		Data:    nil,
-	}
-	data, err := datagram.MarshalBinary()
-	if err != nil {
-		return err
-	}
-	_, err = writeToWithContext(ctx, sess.ln.logger, sess.ln.conn, data, sess.remote)
+	err := sess.ln.sendFlags(ctx, sess.remote, flagLeave)
 	if err != nil {
 		return err
 	}
