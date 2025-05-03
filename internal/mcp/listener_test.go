@@ -6,11 +6,90 @@ import (
 	"errors"
 	"log/slog"
 	"multiplayer/internal/mcp"
+	"net"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"golang.org/x/sync/errgroup"
 )
+
+// unreliableConn is a wrapper around net.PacketConn with artifical
+// unreliability.
+//
+// It includes:
+// - Predictable packet misses
+// - TODO: Packet duplications
+type unreliableConn struct {
+	counter atomic.Uint32
+	net.PacketConn
+}
+
+func (uc *unreliableConn) ReadFrom(p []byte) (int, net.Addr, error) {
+	counter := uc.counter.Add(1)
+	if counter%2 == 0 {
+		_, _, _ = uc.PacketConn.ReadFrom(p)
+		return uc.PacketConn.ReadFrom(p)
+	}
+	return uc.PacketConn.ReadFrom(p)
+}
+
+func listenUnreliably(laddr string) (net.PacketConn, error) {
+	conn, err := net.ListenPacket("udp", laddr)
+	if err != nil {
+		return nil, err
+	}
+	return &unreliableConn{PacketConn: conn}, nil
+}
+
+func TestListener(t *testing.T) {
+	const n = 10
+
+	ctx := context.Background()
+
+	ln, err := mcp.Listen("127.0.0.1:", mcp.WithListenFunc(listenUnreliably))
+	assert.NoError(t, err)
+	defer func() { assert.NoError(t, ln.Close(context.Background())) }()
+
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for range n {
+		go func() {
+			defer wg.Done()
+			_, err := mcp.Dial(ctx, ln.LocalAddr().String())
+			assert.NoError(t, err)
+		}()
+	}
+
+	remoteAddrMap := map[string]struct{}{}
+
+	numAccepted := 0
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	for {
+		sess, err := ln.Accept(ctx)
+		if errors.Is(err, mcp.ErrClosed) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			break
+		}
+		assert.NoError(t, err)
+
+		raddr := sess.RemoteAddr().String()
+		if _, exists := remoteAddrMap[raddr]; exists {
+			t.Errorf("been dialed twice from the same raddr %q", raddr)
+		} else {
+			remoteAddrMap[raddr] = struct{}{}
+			numAccepted++
+		}
+	}
+
+	if n != numAccepted {
+		t.Errorf("expected %d accepts; actual %d", n, numAccepted)
+	}
+
+	wg.Wait()
+}
 
 type assertLogHandler struct {
 	handler slog.Handler
