@@ -36,8 +36,10 @@ const (
 // 3. sessions (multiplex incoming messages)
 
 type Listener struct {
-	options
-	local net.Addr
+	dial     bool
+	dataSize int
+	logger   *slog.Logger
+	local    net.Addr
 
 	sessions    map[string]*Session // maps raddr to session
 	sessionCond sync.Cond           // notifies _addition_ of new sessions
@@ -106,7 +108,9 @@ func Listen(laddr string, opts ...Option) (*Listener, error) {
 
 	// NOTE: keep fields exhaustive
 	ln := &Listener{
-		options:     o,
+		dial:        o.dial,
+		dataSize:    o.dataSize,
+		logger:      o.logger,
 		local:       conn.LocalAddr(),
 		sessions:    map[string]*Session{},
 		sessionCond: sync.Cond{L: &sync.Mutex{}},
