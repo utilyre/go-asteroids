@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"image"
 	_ "image/png"
 	"log/slog"
 	"multiplayer/internal/jitter"
 	"multiplayer/internal/mcp"
 	"multiplayer/internal/state"
-	"os"
 	"sync"
 	"time"
 
@@ -23,8 +21,11 @@ type snapshot struct {
 }
 
 type Game struct {
-	houseImg *ebiten.Image
-	sess     *mcp.Session
+	imgPlayer *ebiten.Image
+	imgBullet *ebiten.Image
+	imgRock   *ebiten.Image
+
+	sess *mcp.Session
 
 	inputBuffer     jitter.Buffer
 	inputBufferLock sync.Mutex
@@ -36,19 +37,16 @@ type Game struct {
 	snapshotLock   sync.Mutex
 }
 
-func New(ctx context.Context, raddr string) (*Game, error) {
-	houseImg, err := openImage("./assets/house.png")
-	if err != nil {
-		return nil, err
-	}
-
+func New(ctx context.Context, raddr string, imgPlayer, imgBullet, imgRock *ebiten.Image) (*Game, error) {
 	sess, err := mcp.Dial(ctx, raddr, mcp.WithLogger(slog.Default()))
 	if err != nil {
 		return nil, err
 	}
 
 	g := &Game{
-		houseImg:        ebiten.NewImageFromImage(houseImg),
+		imgPlayer:       imgPlayer,
+		imgBullet:       imgBullet,
+		imgRock:         imgRock,
 		sess:            sess,
 		inputBuffer:     jitter.Buffer{},
 		inputBufferLock: sync.Mutex{},
@@ -130,8 +128,8 @@ func (g *Game) Layout(int, int) (int, int) {
 func (g *Game) Draw(screen *ebiten.Image) {
 	var m ebiten.GeoM
 	m.Scale(0.2, 0.2)
-	m.Translate(g.state.House.Trans.X, g.state.House.Trans.Y)
-	screen.DrawImage(g.houseImg, &ebiten.DrawImageOptions{
+	m.Translate(g.state.Player.Trans.X, g.state.Player.Trans.Y)
+	screen.DrawImage(g.imgPlayer, &ebiten.DrawImageOptions{
 		GeoM: m,
 	})
 }
@@ -183,19 +181,4 @@ func (g *Game) Update() error {
 	g.snapshotLock.Unlock()
 
 	return nil
-}
-
-func openImage(name string) (img image.Image, err error) {
-	f, err := os.Open(name)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { err = errors.Join(err, f.Close()) }()
-
-	img, _, err = image.Decode(f)
-	if err != nil {
-		return nil, err
-	}
-
-	return img, nil
 }

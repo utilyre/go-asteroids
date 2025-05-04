@@ -4,12 +4,10 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"image"
 	"log/slog"
 	"multiplayer/internal/jitter"
 	"multiplayer/internal/mcp"
 	"multiplayer/internal/state"
-	"os"
 	"sync"
 	"time"
 
@@ -17,7 +15,10 @@ import (
 )
 
 type Simulation struct {
-	houseImg       *ebiten.Image
+	imgPlayer *ebiten.Image
+	imgBullet *ebiten.Image
+	imgRock   *ebiten.Image
+
 	ln             *mcp.Listener
 	clients        map[string]clientType
 	clientLock     sync.Mutex
@@ -25,12 +26,7 @@ type Simulation struct {
 	lastStateIndex uint32
 }
 
-func New(laddr string) (*Simulation, error) {
-	houseImg, err := openImage("./assets/house.png")
-	if err != nil {
-		return nil, err
-	}
-
+func New(laddr string, imgPlayer, imgBullet, imgRock *ebiten.Image) (*Simulation, error) {
 	ln, err := mcp.Listen(laddr, mcp.WithLogger(slog.Default()))
 	if err != nil {
 		return nil, err
@@ -38,7 +34,9 @@ func New(laddr string) (*Simulation, error) {
 	slog.Info("bound udp/mcp listener", "address", ln.LocalAddr())
 
 	sim := &Simulation{
-		houseImg:       ebiten.NewImageFromImage(houseImg),
+		imgPlayer:      imgPlayer,
+		imgBullet:      imgBullet,
+		imgRock:        imgRock,
 		ln:             ln,
 		clients:        map[string]clientType{},
 		clientLock:     sync.Mutex{},
@@ -124,20 +122,6 @@ func (sim *Simulation) acceptLoop(ctx context.Context) {
 	}
 }
 
-func openImage(name string) (img image.Image, err error) {
-	f, err := os.Open(name)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { err = errors.Join(err, f.Close()) }()
-
-	img, _, err = image.Decode(f)
-	if err != nil {
-		return nil, err
-	}
-
-	return img, nil
-}
 func (sim *Simulation) Close(ctx context.Context) error {
 	return sim.ln.Close(ctx)
 }
@@ -149,8 +133,8 @@ func (sim *Simulation) Layout(int, int) (int, int) {
 func (sim *Simulation) Draw(screen *ebiten.Image) {
 	var m ebiten.GeoM
 	m.Scale(0.2, 0.2)
-	m.Translate(sim.state.House.Trans.X, sim.state.House.Trans.Y)
-	screen.DrawImage(sim.houseImg, &ebiten.DrawImageOptions{
+	m.Translate(sim.state.Player.Trans.X, sim.state.Player.Trans.Y)
+	screen.DrawImage(sim.imgPlayer, &ebiten.DrawImageOptions{
 		GeoM: m,
 	})
 }
