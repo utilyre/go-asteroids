@@ -26,8 +26,9 @@ var (
 const version byte = 1
 
 const (
-	flagJoin uint16 = 1 << iota
-	flagLeave
+	flagSyn uint16 = 1 << iota
+	flagAck
+	flagClose
 )
 
 // how is this any different from net.PacketConn?
@@ -45,6 +46,7 @@ type Listener struct {
 	sessions    map[string]*Session // maps raddr to session
 	sessionCond sync.Cond           // notifies _addition_ of new sessions
 	acceptCh    chan *Session
+	dialCh      chan net.Addr
 
 	conn    net.PacketConn
 	die     chan struct{}
@@ -131,6 +133,7 @@ func Listen(laddr string, opts ...Option) (*Listener, error) {
 		sessions:    map[string]*Session{},
 		sessionCond: sync.Cond{L: &sync.Mutex{}},
 		acceptCh:    make(chan *Session),
+		dialCh:      make(chan net.Addr),
 		conn:        conn,
 		die:         make(chan struct{}),
 		dieOnce:     sync.Once{},
@@ -152,12 +155,16 @@ func Dial(ctx context.Context, raddr string, opts ...Option) (*Session, error) {
 		return nil, err
 	}
 
-	err = ln.sendFlags(ctx, remote, flagJoin)
+	err = ln.sendFlags(ctx, remote, flagSyn)
 	if err != nil {
 		return nil, err
 	}
 
-	// TODO: retry if not acknowledged
+	select {
+	case <-ln.dialCh:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 
 	sess := newSession(true, ln.local, remote, ln)
 	sess.ln = ln
@@ -361,14 +368,9 @@ func (ln *Listener) handleDatagram(ctx context.Context, remote net.Addr, datagra
 	if datagram.Version != version {
 		return fmt.Errorf("version %d: version is not supported", datagram.Version)
 	}
-	if datagram.Flags&flagJoin != 0 && datagram.Flags&flagLeave != 0 {
-		return fmt.Errorf("flags %08b: unknown state", datagram.Flags)
-	}
 
 	switch {
-	case datagram.Flags&flagJoin != 0:
-		// TODO: acknowledge join
-
+	case datagram.Flags&flagSyn != 0:
 		sess := newSession(false, ln.local, remote, ln)
 		ln.sessionCond.L.Lock()
 		if _, exists := ln.sessions[remote.String()]; exists {
@@ -379,9 +381,18 @@ func (ln *Listener) handleDatagram(ctx context.Context, remote net.Addr, datagra
 		ln.sessionCond.L.Unlock()
 		ln.sessionCond.Broadcast()
 
+		// using context.Background() so that no writes are affected
+		err := ln.sendFlags(context.Background(), remote, flagSyn|flagAck)
+		if err != nil {
+			return err
+		}
+
 		ln.acceptCh <- sess
 
-	case datagram.Flags&flagLeave != 0:
+	case datagram.Flags&(flagSyn|flagAck) != 0:
+		ln.dialCh <- remote
+
+	case datagram.Flags&flagClose != 0:
 		ln.sessionCond.L.Lock()
 		if _, exists := ln.sessions[remote.String()]; !exists {
 			ln.sessionCond.L.Unlock()
@@ -515,7 +526,7 @@ func (sess *Session) TrySend(data []byte) bool {
 }
 
 func (sess *Session) sendLeave(ctx context.Context) error {
-	err := sess.ln.sendFlags(ctx, sess.remote, flagLeave)
+	err := sess.ln.sendFlags(ctx, sess.remote, flagClose)
 	if err != nil {
 		return err
 	}

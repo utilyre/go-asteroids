@@ -47,18 +47,21 @@ func listenUnreliably(laddr string) (net.PacketConn, error) {
 func TestListener(t *testing.T) {
 	const n = 10
 
-	ctx := context.Background()
-
-	ln, err := mcp.Listen("127.0.0.1:", mcp.WithListenFunc(listenUnreliably))
+	ln, err := mcp.Listen("127.0.0.1:",
+		mcp.WithListenFunc(listenUnreliably),
+		mcp.WithLogger(slog.Default()))
 	assert.NoError(t, err)
-	defer func() { assert.NoError(t, ln.Close(context.Background())) }()
+	defer func() { assert.NoError(t, ln.Close(context.TODO())) }()
 
 	var wg sync.WaitGroup
 	wg.Add(n)
 	for range n {
 		go func() {
 			defer wg.Done()
-			_, err := mcp.Dial(ctx, ln.LocalAddr().String())
+			ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
+			defer cancel()
+			_, err := mcp.Dial(ctx, ln.LocalAddr().String(),
+				mcp.WithLogger(slog.Default()))
 			assert.NoError(t, err)
 		}()
 	}
