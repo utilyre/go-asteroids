@@ -15,6 +15,7 @@ const InputSize = 1
 // A zero valued input does not manipulate the state.
 type Input struct {
 	Left, Down, Up, Right bool
+	Space                 bool
 }
 
 func (s *State) Update(delta time.Duration, inputs []Input) {
@@ -121,6 +122,9 @@ func (i Input) MarshalBinary() ([]byte, error) {
 	if i.Right {
 		b |= 1 << 3
 	}
+	if i.Space {
+		b |= 1 << 4
+	}
 	return []byte{b}, nil
 }
 
@@ -134,6 +138,7 @@ func (i *Input) UnmarshalBinary(data []byte) error {
 	i.Down = b&(1<<1) != 0
 	i.Up = b&(1<<2) != 0
 	i.Right = b&(1<<3) != 0
+	i.Space = b&(1<<4) != 0
 	return nil
 }
 
