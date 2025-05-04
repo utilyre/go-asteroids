@@ -127,9 +127,12 @@ func (g *Game) Layout(int, int) (int, int) {
 
 func (g *Game) Draw(screen *ebiten.Image) {
 	var m ebiten.GeoM
+	bounds := g.imgPlayer.Bounds()
+	m.Translate(-float64(bounds.Dx()/2), -float64(bounds.Dy()/2))
+	m.Rotate(g.state.Player.Rotation)
 	m.Scale(
-		state.PlayerSize/float64(g.imgPlayer.Bounds().Dx()),
-		state.PlayerSize/float64(g.imgPlayer.Bounds().Dy()),
+		state.PlayerSize/float64(bounds.Dx()),
+		state.PlayerSize/float64(bounds.Dy()),
 	)
 	m.Translate(g.state.Player.Trans.X, g.state.Player.Trans.Y)
 	screen.DrawImage(g.imgPlayer, &ebiten.DrawImageOptions{
@@ -139,10 +142,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 func (g *Game) Update() error {
 	input := state.Input{
-		Left:  ebiten.IsKeyPressed(ebiten.KeyH),
-		Down:  ebiten.IsKeyPressed(ebiten.KeyJ),
-		Up:    ebiten.IsKeyPressed(ebiten.KeyK),
-		Right: ebiten.IsKeyPressed(ebiten.KeyL),
+		Left:  ebiten.IsKeyPressed(ebiten.KeyA),
+		Down:  ebiten.IsKeyPressed(ebiten.KeyS),
+		Up:    ebiten.IsKeyPressed(ebiten.KeyW),
+		Right: ebiten.IsKeyPressed(ebiten.KeyD),
 	}
 
 	g.inputBufferLock.Lock()

@@ -28,23 +28,25 @@ func (s *State) Update(delta time.Duration, inputs []Input) {
 	const houseAccel = 300
 	dt := delta.Seconds()
 
-	var v Vec2
+	var movement Vec2
+	var rotation float64
 	for _, input := range inputs {
-		if input.Left {
-			v.X -= 1
-		}
 		if input.Down {
-			v.Y += 1
+			movement.Y += 1
 		}
 		if input.Up {
-			v.Y -= 1
+			movement.Y -= 1
+		}
+		if input.Left {
+			rotation -= 1
 		}
 		if input.Right {
-			v.X += 1
+			rotation += 1
 		}
 	}
 
-	s.Player.Accel = v.Normalize().Mul(houseAccel)
+	s.Player.Rotation += 0.1 * rotation
+	s.Player.Accel = movement.Normalize().Mul(houseAccel).Rotate(s.Player.Rotation)
 	s.Player.Trans = s.Player.Accel.Mul(0.5 * dt * dt).Add(s.Player.Vel.Mul(dt)).Add(s.Player.Trans)
 	s.Player.Vel = s.Player.Accel.Mul(dt).Add(s.Player.Vel)
 }
@@ -55,17 +57,29 @@ type State struct {
 	Player Movable
 }
 
+func InitState() State {
+	return State{
+		Player: Movable{
+			Trans:    Vec2{PlayerSize, PlayerSize},
+			Vel:      Vec2{},
+			Accel:    Vec2{},
+			Rotation: 0,
+		},
+	}
+}
+
 func (s State) Lerp(other State, t float64) State {
 	s.Player = s.Player.Lerp(other.Player, t)
 	return s
 }
 
-const MovableSize = 3 * Vec2Size
+const MovableSize = 3*Vec2Size + 16
 
 type Movable struct {
-	Trans Vec2
-	Vel   Vec2
-	Accel Vec2
+	Trans    Vec2
+	Vel      Vec2
+	Accel    Vec2
+	Rotation float64
 }
 
 func (m Movable) Lerp(other Movable, t float64) Movable {
@@ -105,6 +119,14 @@ func (v Vec2) Add(other Vec2) Vec2 {
 func (v Vec2) Mul(other float64) Vec2 {
 	v.X *= other
 	v.Y *= other
+	return v
+}
+
+func (v Vec2) Rotate(rotation float64) Vec2 {
+	cos := math.Cos(rotation)
+	sin := math.Sin(rotation)
+	v.X = cos*v.X - sin*v.Y
+	v.Y = sin*v.X + cos*v.Y
 	return v
 }
 
@@ -182,6 +204,11 @@ func (h Movable) MarshalBinary() ([]byte, error) {
 	}
 	copy(data[2*Vec2Size:], b)
 
+	_, err = binary.Encode(data[3*Vec2Size:], binary.BigEndian, h.Rotation)
+	if err != nil {
+		return nil, err
+	}
+
 	return data, nil
 }
 
@@ -199,6 +226,11 @@ func (h *Movable) UnmarshalBinary(data []byte) error {
 		return err
 	}
 	err = h.Accel.UnmarshalBinary(data[2*Vec2Size:])
+	if err != nil {
+		return err
+	}
+
+	_, err = binary.Decode(data[3*Vec2Size:], binary.BigEndian, &h.Rotation)
 	if err != nil {
 		return err
 	}

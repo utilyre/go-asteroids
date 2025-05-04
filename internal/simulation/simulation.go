@@ -40,7 +40,7 @@ func New(laddr string, imgPlayer, imgBullet, imgRock *ebiten.Image) (*Simulation
 		ln:             ln,
 		clients:        map[string]clientType{},
 		clientLock:     sync.Mutex{},
-		state:          state.State{},
+		state:          state.InitState(),
 		lastStateIndex: 0,
 	}
 	go sim.acceptLoop(context.Background())
@@ -132,9 +132,12 @@ func (sim *Simulation) Layout(int, int) (int, int) {
 
 func (sim *Simulation) Draw(screen *ebiten.Image) {
 	var m ebiten.GeoM
+	bounds := sim.imgPlayer.Bounds()
+	m.Translate(-float64(bounds.Dx()/2), -float64(bounds.Dy()/2))
+	m.Rotate(sim.state.Player.Rotation)
 	m.Scale(
-		state.PlayerSize/float64(sim.imgPlayer.Bounds().Dx()),
-		state.PlayerSize/float64(sim.imgPlayer.Bounds().Dy()),
+		state.PlayerSize/float64(bounds.Dx()),
+		state.PlayerSize/float64(bounds.Dy()),
 	)
 	m.Translate(sim.state.Player.Trans.X, sim.state.Player.Trans.Y)
 	screen.DrawImage(sim.imgPlayer, &ebiten.DrawImageOptions{
