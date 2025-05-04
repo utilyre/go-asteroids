@@ -38,30 +38,35 @@ func (s *State) Update(delta time.Duration, inputs []Input) {
 		}
 	}
 
-	s.House.Accel = v.Normalize().Mul(houseAccel)
-	s.House.Trans = s.House.Accel.Mul(0.5 * dt * dt).Add(s.House.Vel.Mul(dt)).Add(s.House.Trans)
-	s.House.Vel = s.House.Accel.Mul(dt).Add(s.House.Vel)
+	s.Player.Accel = v.Normalize().Mul(houseAccel)
+	s.Player.Trans = s.Player.Accel.Mul(0.5 * dt * dt).Add(s.Player.Vel.Mul(dt)).Add(s.Player.Trans)
+	s.Player.Vel = s.Player.Accel.Mul(dt).Add(s.Player.Vel)
 }
 
-const StateSize = HouseSize
+const StateSize = MovableSize
 
 type State struct {
-	House House
+	Player Movable
 }
 
 func (s State) Lerp(other State, t float64) State {
-	s.House.Trans = s.House.Trans.Lerp(other.House.Trans, t)
-	s.House.Vel = s.House.Vel.Lerp(other.House.Vel, t)
-	s.House.Accel = s.House.Accel.Lerp(other.House.Accel, t)
+	s.Player.Lerp(other.Player, t)
 	return s
 }
 
-const HouseSize = 3 * Vec2Size
+const MovableSize = 3 * Vec2Size
 
-type House struct {
+type Movable struct {
 	Trans Vec2
 	Vel   Vec2
 	Accel Vec2
+}
+
+func (m Movable) Lerp(other Movable, t float64) Movable {
+	m.Trans = m.Trans.Lerp(other.Trans, t)
+	m.Vel = m.Vel.Lerp(other.Vel, t)
+	m.Accel = m.Accel.Lerp(other.Accel, t)
+	return m
 }
 
 const Vec2Size = 16
@@ -143,15 +148,15 @@ func (i *Input) UnmarshalBinary(data []byte) error {
 }
 
 func (s State) MarshalBinary() ([]byte, error) {
-	return s.House.MarshalBinary()
+	return s.Player.MarshalBinary()
 }
 
 func (s *State) UnmarshalBinary(data []byte) error {
-	return s.House.UnmarshalBinary(data)
+	return s.Player.UnmarshalBinary(data)
 }
 
-func (h House) MarshalBinary() ([]byte, error) {
-	data := make([]byte, HouseSize)
+func (h Movable) MarshalBinary() ([]byte, error) {
+	data := make([]byte, MovableSize)
 
 	b, err := h.Trans.MarshalBinary()
 	if err != nil {
@@ -174,9 +179,9 @@ func (h House) MarshalBinary() ([]byte, error) {
 	return data, nil
 }
 
-func (h *House) UnmarshalBinary(data []byte) error {
-	if l := len(data); l < HouseSize {
-		return fmt.Errorf("data length %d less than %d: %w", l, HouseSize, ErrShortData)
+func (h *Movable) UnmarshalBinary(data []byte) error {
+	if l := len(data); l < MovableSize {
+		return fmt.Errorf("data length %d less than %d: %w", l, MovableSize, ErrShortData)
 	}
 
 	err := h.Trans.UnmarshalBinary(data)

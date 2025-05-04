@@ -34,7 +34,7 @@ func FuzzState(f *testing.F) {
 	f.Add(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 	f.Fuzz(func(t *testing.T, transX, transY, velX, velY, accelX, accelY float64) {
 		expected := state.State{
-			House: state.House{
+			Player: state.Movable{
 				Trans: state.Vec2{transX, transY},
 				Vel:   state.Vec2{velX, velY},
 				Accel: state.Vec2{accelX, accelY},
