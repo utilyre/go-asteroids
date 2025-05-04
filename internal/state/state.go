@@ -13,7 +13,7 @@ var ErrShortData = errors.New("short data")
 const (
 	ScreenWidth  = 1920
 	ScreenHeight = 1080
-	PlayerSize   = 150
+	PlayerSize   = 80
 )
 
 const InputSize = 1
@@ -25,17 +25,21 @@ type Input struct {
 }
 
 func (s *State) Update(delta time.Duration, inputs []Input) {
-	const houseAccel = 300
+	const (
+		playerRotation = 0.3
+		playerAccel    = 500
+	)
+
 	dt := delta.Seconds()
 
-	var movement Vec2
+	var forward float64
 	var rotation float64
 	for _, input := range inputs {
 		if input.Down {
-			movement.Y += 1
+			forward += 1
 		}
 		if input.Up {
-			movement.Y -= 1
+			forward -= 1
 		}
 		if input.Left {
 			rotation -= 1
@@ -44,9 +48,11 @@ func (s *State) Update(delta time.Duration, inputs []Input) {
 			rotation += 1
 		}
 	}
+	forward = signum(forward)
 
-	s.Player.Rotation += 0.1 * rotation
-	s.Player.Accel = movement.Normalize().Mul(houseAccel).Rotate(s.Player.Rotation)
+	s.Player.Rotation += playerRotation * rotation
+	s.Player.Accel = HeadVec2(0.5*math.Pi + s.Player.Rotation).Mul(playerAccel * forward)
+	//                            π/2 - (-a) = π/2 + a
 	s.Player.Trans = s.Player.Accel.Mul(0.5 * dt * dt).Add(s.Player.Vel.Mul(dt)).Add(s.Player.Trans)
 	s.Player.Vel = s.Player.Accel.Mul(dt).Add(s.Player.Vel)
 }
@@ -86,12 +92,30 @@ func (m Movable) Lerp(other Movable, t float64) Movable {
 	m.Trans = m.Trans.Lerp(other.Trans, t)
 	m.Vel = m.Vel.Lerp(other.Vel, t)
 	m.Accel = m.Accel.Lerp(other.Accel, t)
+	m.Rotation = lerp(m.Rotation, other.Rotation, t)
 	return m
 }
 
 const Vec2Size = 16
 
 type Vec2 struct{ X, Y float64 }
+
+func HeadVec2(angle float64) Vec2 {
+	return Vec2{
+		X: math.Cos(angle),
+		Y: math.Sin(angle),
+	}
+}
+
+func signum(x float64) float64 {
+	if x > 0 {
+		return 1
+	}
+	if x < 0 {
+		return -1
+	}
+	return 0
+}
 
 func lerp(a, b, t float64) float64 {
 	if t <= 0 {

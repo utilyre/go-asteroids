@@ -104,6 +104,7 @@ func connectAndRun(ctx context.Context, raddr string, imgPlayer, imgBullet, imgR
 
 	ebiten.SetWindowTitle("Asteroids")
 	ebiten.SetWindowSize(640, 360)
+	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	err = ebiten.RunGame(g)
 	if err != nil {
 		slog.Error("failed to run game as an ebiten game", "error", err)
