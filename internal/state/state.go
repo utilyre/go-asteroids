@@ -50,7 +50,7 @@ type State struct {
 }
 
 func (s State) Lerp(other State, t float64) State {
-	s.Player.Lerp(other.Player, t)
+	s.Player = s.Player.Lerp(other.Player, t)
 	return s
 }
 
