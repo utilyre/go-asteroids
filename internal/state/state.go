@@ -10,6 +10,12 @@ import (
 
 var ErrShortData = errors.New("short data")
 
+const (
+	ScreenWidth  = 1920
+	ScreenHeight = 1080
+	PlayerSize   = 150
+)
+
 const InputSize = 1
 
 // A zero valued input does not manipulate the state.

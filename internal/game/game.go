@@ -122,12 +122,15 @@ func (g *Game) Close(ctx context.Context) error {
 }
 
 func (g *Game) Layout(int, int) (int, int) {
-	return 640, 480
+	return state.ScreenWidth, state.ScreenHeight
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
 	var m ebiten.GeoM
-	m.Scale(0.2, 0.2)
+	m.Scale(
+		state.PlayerSize/float64(g.imgPlayer.Bounds().Dx()),
+		state.PlayerSize/float64(g.imgPlayer.Bounds().Dy()),
+	)
 	m.Translate(g.state.Player.Trans.X, g.state.Player.Trans.Y)
 	screen.DrawImage(g.imgPlayer, &ebiten.DrawImageOptions{
 		GeoM: m,

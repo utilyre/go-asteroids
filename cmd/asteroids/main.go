@@ -80,6 +80,7 @@ func listenAndSimulate(ctx context.Context, addr string, imgPlayer, imgBullet, i
 	}()
 
 	ebiten.SetWindowTitle("Asteroids [SERVER]")
+	ebiten.SetWindowSize(640, 360)
 	ebiten.SetTPS(10)
 	err = ebiten.RunGame(sim)
 	if err != nil {
@@ -102,6 +103,7 @@ func connectAndRun(ctx context.Context, raddr string, imgPlayer, imgBullet, imgR
 	}()
 
 	ebiten.SetWindowTitle("Asteroids")
+	ebiten.SetWindowSize(640, 360)
 	err = ebiten.RunGame(g)
 	if err != nil {
 		slog.Error("failed to run game as an ebiten game", "error", err)

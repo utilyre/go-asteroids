@@ -127,12 +127,15 @@ func (sim *Simulation) Close(ctx context.Context) error {
 }
 
 func (sim *Simulation) Layout(int, int) (int, int) {
-	return 640, 480
+	return state.ScreenWidth, state.ScreenHeight
 }
 
 func (sim *Simulation) Draw(screen *ebiten.Image) {
 	var m ebiten.GeoM
-	m.Scale(0.2, 0.2)
+	m.Scale(
+		state.PlayerSize/float64(sim.imgPlayer.Bounds().Dx()),
+		state.PlayerSize/float64(sim.imgPlayer.Bounds().Dy()),
+	)
 	m.Translate(sim.state.Player.Trans.X, sim.state.Player.Trans.Y)
 	screen.DrawImage(sim.imgPlayer, &ebiten.DrawImageOptions{
 		GeoM: m,
