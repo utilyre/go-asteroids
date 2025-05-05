@@ -162,20 +162,22 @@ func InitState() State {
 }
 
 func (s State) Lerp(other State, t float64) State {
-	if len(s.Players) != len(other.Players) || len(s.Bullets) != len(other.Bullets) {
-		// TODO: fault tolerate this
-		// panic("current and other state do not have the same number of players")
-		return s
+	// TODO: figure out a way to interpolate even if there are removed/added elements
+
+	if len(s.Players) == len(other.Players) {
+		for i, rplayer := range other.Players {
+			player := &s.Players[i]
+			*player = player.Lerp(rplayer, t)
+		}
 	}
 
-	for i, rplayer := range other.Players {
-		player := &s.Players[i]
-		*player = player.Lerp(rplayer, t)
+	if len(s.Bullets) == len(other.Bullets) {
+		for i, rbullet := range other.Bullets {
+			bullet := &s.Bullets[i]
+			*bullet = bullet.Lerp(rbullet, t)
+		}
 	}
-	for i, rbullet := range other.Bullets {
-		bullet := &s.Bullets[i]
-		*bullet = bullet.Lerp(rbullet, t)
-	}
+
 	return s
 }
 
