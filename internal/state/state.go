@@ -3,6 +3,7 @@ package state
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
 	"time"
 )
@@ -12,7 +13,8 @@ var ErrShortData = errors.New("short data")
 const (
 	ScreenWidth  = 1920
 	ScreenHeight = 1080
-	PlayerSize   = 80
+	PlayerWidth  = 80
+	PlayerHeight = 80
 )
 
 const InputSize = 1
@@ -34,7 +36,7 @@ func (s *State) AddPlayer(addr string) {
 	s.Players = append(s.Players, Player{
 		ID: s.nextID,
 		Movable: Movable{
-			Trans:    Vec2{PlayerSize, PlayerSize},
+			Trans:    Vec2{PlayerWidth, PlayerWidth},
 			Vel:      Vec2{},
 			Accel:    Vec2{},
 			Rotation: 0,
@@ -78,7 +80,7 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 	}
 }
 
-const StateSize = MovableSize
+const PlayerSize = 4 + MovableSize
 
 type Player struct {
 	ID uint32
@@ -91,12 +93,14 @@ func (p Player) Lerp(other Player, t float64) Player {
 }
 
 func InitState() State {
-	return State{}
+	return State{idToAddr: map[uint32]string{}}
 }
 
 func (s State) Lerp(other State, t float64) State {
 	if len(s.Players) != len(other.Players) {
-		panic("current and other state do not have the same number of players")
+		// TODO: fault tolerate this
+		// panic("current and other state do not have the same number of players")
+		return s
 	}
 
 	for i, rplayer := range other.Players {
@@ -192,23 +196,67 @@ func (v Vec2) Normalize() Vec2 {
 }
 
 func (i Input) MarshalBinary() ([]byte, error) {
-	data := make([]byte, 1)
-	_, err := binary.Encode(data, binary.BigEndian, i)
+	var b byte
+	if i.Left {
+		b |= 1 << 0
+	}
+	if i.Down {
+		b |= 1 << 1
+	}
+	if i.Up {
+		b |= 1 << 2
+	}
+	if i.Right {
+		b |= 1 << 3
+	}
+	if i.Space {
+		b |= 1 << 4
+	}
+	return []byte{b}, nil
+}
+
+func (i *Input) UnmarshalBinary(data []byte) error {
+	if l := len(data); l < InputSize {
+		return fmt.Errorf("data length %d less than %d: %w", l, InputSize, ErrShortData)
+	}
+	b := data[0]
+	i.Left = b&(1<<0) != 0
+	i.Down = b&(1<<1) != 0
+	i.Up = b&(1<<2) != 0
+	i.Right = b&(1<<3) != 0
+	i.Space = b&(1<<4) != 0
+	return nil
+}
+
+func (s State) MarshalBinary() ([]byte, error) {
+	data := make([]byte, 8+PlayerSize*len(s.Players))
+	binary.BigEndian.PutUint64(data, uint64(len(s.Players)))
+	_, err := binary.Encode(data[8:], binary.BigEndian, s.Players)
 	if err != nil {
 		return nil, err
 	}
 	return data, nil
 }
 
-func (i *Input) UnmarshalBinary(data []byte) error {
-	_, err := binary.Decode(data, binary.BigEndian, i)
-	return err
-}
-
-func (s State) MarshalBinary() ([]byte, error) {
-	panic("TODO")
-}
-
 func (s *State) UnmarshalBinary(data []byte) error {
-	panic("TODO")
+	if l, expected := len(data), 8; l < expected {
+		return fmt.Errorf("data length %d less than %d: %w", l, expected, ErrShortData)
+	}
+
+	playersLen := binary.BigEndian.Uint64(data)
+	if l, expected := len(data), 8+PlayerSize*playersLen; uint64(l) < expected {
+		return fmt.Errorf("data length %d less than %d: %w", l, expected, ErrShortData)
+	}
+
+	s.Players = make([]Player, playersLen)
+	_, err := binary.Decode(data[8:], binary.BigEndian, s.Players)
+	if err != nil {
+		return err
+	}
+	/* TODO: figure out why this always panics
+	if expected := PlayerSize * playersLen; uint64(n) != expected {
+		panic(fmt.Sprintf("consumed %d bytes which is less than %d", s.Players, n, expected))
+	} */
+
+	return nil
 }

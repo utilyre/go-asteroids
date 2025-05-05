@@ -24,6 +24,8 @@ type Simulation struct {
 	clientLock     sync.Mutex
 	state          state.State
 	lastStateIndex uint32
+
+	newAddrCh chan string
 }
 
 func New(laddr string, imgPlayer, imgBullet, imgRock *ebiten.Image) (*Simulation, error) {
@@ -42,6 +44,7 @@ func New(laddr string, imgPlayer, imgBullet, imgRock *ebiten.Image) (*Simulation
 		clientLock:     sync.Mutex{},
 		state:          state.InitState(),
 		lastStateIndex: 0,
+		newAddrCh:      make(chan string, 10),
 	}
 	go sim.acceptLoop(context.Background())
 	return sim, nil
@@ -119,10 +122,13 @@ func (sim *Simulation) acceptLoop(ctx context.Context) {
 		sim.clientLock.Lock()
 		sim.clients[raddr] = client
 		sim.clientLock.Unlock()
+
+		sim.newAddrCh <- raddr
 	}
 }
 
 func (sim *Simulation) Close(ctx context.Context) error {
+	close(sim.newAddrCh)
 	return sim.ln.Close(ctx)
 }
 
@@ -131,18 +137,20 @@ func (sim *Simulation) Layout(int, int) (int, int) {
 }
 
 func (sim *Simulation) Draw(screen *ebiten.Image) {
-	var m ebiten.GeoM
-	bounds := sim.imgPlayer.Bounds()
-	m.Translate(-float64(bounds.Dx()/2), -float64(bounds.Dy()/2))
-	m.Rotate(sim.state.Player.Rotation)
-	m.Scale(
-		state.PlayerSize/float64(bounds.Dx()),
-		state.PlayerSize/float64(bounds.Dy()),
-	)
-	m.Translate(sim.state.Player.Trans.X, sim.state.Player.Trans.Y)
-	screen.DrawImage(sim.imgPlayer, &ebiten.DrawImageOptions{
-		GeoM: m,
-	})
+	for _, player := range sim.state.Players {
+		var m ebiten.GeoM
+		bounds := sim.imgPlayer.Bounds()
+		m.Translate(-float64(bounds.Dx()/2), -float64(bounds.Dy()/2))
+		m.Rotate(player.Rotation)
+		m.Scale(
+			state.PlayerWidth/float64(bounds.Dx()),
+			state.PlayerHeight/float64(bounds.Dy()),
+		)
+		m.Translate(player.Trans.X, player.Trans.Y)
+		screen.DrawImage(sim.imgPlayer, &ebiten.DrawImageOptions{
+			GeoM: m,
+		})
+	}
 }
 
 func (sim *Simulation) Update() error {
@@ -151,12 +159,22 @@ func (sim *Simulation) Update() error {
 	ctx, cancel := context.WithTimeout(context.Background(), dt)
 	defer cancel()
 
-	var inputs []state.Input
+OUTER:
+	for {
+		select {
+		case addr := <-sim.newAddrCh:
+			sim.state.AddPlayer(addr)
+		default:
+			break OUTER
+		}
+	}
+
+	inputs := map[string]state.Input{}
 	sim.clientLock.Lock()
-	for _, client := range sim.clients {
+	for addr, client := range sim.clients {
 		select {
 		case input := <-client.inputc:
-			inputs = append(inputs, input)
+			inputs[addr] = input
 		default:
 		}
 	}
@@ -164,7 +182,7 @@ func (sim *Simulation) Update() error {
 
 	sim.state.Update(dt, inputs)
 
-	data := make([]byte, 2+4+state.StateSize)
+	data := make([]byte, 2+4)
 	binary.BigEndian.PutUint16(data, 1 /* type = state */)
 	binary.BigEndian.PutUint32(data[2:], sim.lastStateIndex)
 	stateData, err := sim.state.MarshalBinary()
@@ -172,7 +190,7 @@ func (sim *Simulation) Update() error {
 		slog.Warn("failed to marshal state", "error", err)
 		return nil
 	}
-	copy(data[6:], stateData)
+	data = append(data, stateData...)
 	err = sim.ln.Broadcast(ctx, data)
 	if errors.Is(err, mcp.ErrClosed) {
 		return ebiten.Termination

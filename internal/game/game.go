@@ -126,18 +126,20 @@ func (g *Game) Layout(int, int) (int, int) {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	var m ebiten.GeoM
-	bounds := g.imgPlayer.Bounds()
-	m.Translate(-float64(bounds.Dx()/2), -float64(bounds.Dy()/2))
-	m.Rotate(g.state.Player.Rotation)
-	m.Scale(
-		state.PlayerSize/float64(bounds.Dx()),
-		state.PlayerSize/float64(bounds.Dy()),
-	)
-	m.Translate(g.state.Player.Trans.X, g.state.Player.Trans.Y)
-	screen.DrawImage(g.imgPlayer, &ebiten.DrawImageOptions{
-		GeoM: m,
-	})
+	for _, player := range g.state.Players {
+		var m ebiten.GeoM
+		bounds := g.imgPlayer.Bounds()
+		m.Translate(-float64(bounds.Dx()/2), -float64(bounds.Dy()/2))
+		m.Rotate(player.Rotation)
+		m.Scale(
+			state.PlayerWidth/float64(bounds.Dx()),
+			state.PlayerHeight/float64(bounds.Dy()),
+		)
+		m.Translate(player.Trans.X, player.Trans.Y)
+		screen.DrawImage(g.imgPlayer, &ebiten.DrawImageOptions{
+			GeoM: m,
+		})
+	}
 }
 
 func (g *Game) Update() error {
