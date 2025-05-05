@@ -1,9 +1,7 @@
 package state
 
 import (
-	"encoding/binary"
 	"errors"
-	"fmt"
 	"math"
 	"time"
 )
@@ -24,7 +22,19 @@ type Input struct {
 	Space                 bool
 }
 
-func (s *State) Update(delta time.Duration, inputs []Input) {
+func (s *State) AddPlayer(addr string) {
+	s.Players = append(s.Players, Player{
+		Movable: Movable{
+			Trans:    Vec2{PlayerSize, PlayerSize},
+			Vel:      Vec2{},
+			Accel:    Vec2{},
+			Rotation: 0,
+		},
+		addr: addr,
+	})
+}
+
+func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 	const (
 		playerRotation = 0.3
 		playerAccel    = 500
@@ -32,9 +42,12 @@ func (s *State) Update(delta time.Duration, inputs []Input) {
 
 	dt := delta.Seconds()
 
-	var forward float64
-	var rotation float64
-	for _, input := range inputs {
+	for i := range len(s.Players) {
+		player := &s.Players[i]
+		input := inputs[player.addr]
+
+		forward := 0.0
+		rotation := 0.0
 		if input.Down {
 			forward += 1
 		}
@@ -47,35 +60,44 @@ func (s *State) Update(delta time.Duration, inputs []Input) {
 		if input.Right {
 			rotation += 1
 		}
-	}
-	forward = signum(forward)
 
-	s.Player.Rotation += playerRotation * rotation
-	s.Player.Accel = HeadVec2(0.5*math.Pi + s.Player.Rotation).Mul(playerAccel * forward)
-	//                            π/2 - (-a) = π/2 + a
-	s.Player.Trans = s.Player.Accel.Mul(0.5 * dt * dt).Add(s.Player.Vel.Mul(dt)).Add(s.Player.Trans)
-	s.Player.Vel = s.Player.Accel.Mul(dt).Add(s.Player.Vel)
+		player.Rotation += playerRotation * rotation
+		player.Accel = HeadVec2(0.5*math.Pi + player.Rotation).Mul(playerAccel * forward)
+		//                            π/2 - (-a) = π/2 + a
+		player.Trans = player.Accel.Mul(0.5 * dt * dt).Add(player.Vel.Mul(dt)).Add(player.Trans)
+		player.Vel = player.Accel.Mul(dt).Add(player.Vel)
+	}
 }
 
 const StateSize = MovableSize
 
 type State struct {
-	Player Movable
+	Players []Player
+}
+
+type Player struct {
+	addr string
+	Movable
+}
+
+func (p Player) Lerp(other Player, t float64) Player {
+	p.Movable = p.Movable.Lerp(other.Movable, t)
+	return p
 }
 
 func InitState() State {
-	return State{
-		Player: Movable{
-			Trans:    Vec2{PlayerSize, PlayerSize},
-			Vel:      Vec2{},
-			Accel:    Vec2{},
-			Rotation: 0,
-		},
-	}
+	return State{}
 }
 
 func (s State) Lerp(other State, t float64) State {
-	s.Player = s.Player.Lerp(other.Player, t)
+	if len(s.Players) != len(other.Players) {
+		panic("current and other state do not have the same number of players")
+	}
+
+	for i, rplayer := range other.Players {
+		player := &s.Players[i]
+		*player = player.Lerp(rplayer, t)
+	}
 	return s
 }
 
@@ -164,130 +186,10 @@ func (v Vec2) Normalize() Vec2 {
 	return v
 }
 
-// MarshalBinary encodes Input into a single byte where each bit represents a boolean field
-func (i Input) MarshalBinary() ([]byte, error) {
-	var b byte
-	if i.Left {
-		b |= 1 << 0
-	}
-	if i.Down {
-		b |= 1 << 1
-	}
-	if i.Up {
-		b |= 1 << 2
-	}
-	if i.Right {
-		b |= 1 << 3
-	}
-	if i.Space {
-		b |= 1 << 4
-	}
-	return []byte{b}, nil
-}
-
-// UnmarshalBinary decodes a byte into the Input struct
-func (i *Input) UnmarshalBinary(data []byte) error {
-	if l := len(data); l < InputSize {
-		return fmt.Errorf("data length %d less than %d: %w", l, InputSize, ErrShortData)
-	}
-	b := data[0]
-	i.Left = b&(1<<0) != 0
-	i.Down = b&(1<<1) != 0
-	i.Up = b&(1<<2) != 0
-	i.Right = b&(1<<3) != 0
-	i.Space = b&(1<<4) != 0
-	return nil
-}
-
 func (s State) MarshalBinary() ([]byte, error) {
-	return s.Player.MarshalBinary()
+	panic("TODO")
 }
 
 func (s *State) UnmarshalBinary(data []byte) error {
-	return s.Player.UnmarshalBinary(data)
-}
-
-func (h Movable) MarshalBinary() ([]byte, error) {
-	data := make([]byte, MovableSize)
-
-	b, err := h.Trans.MarshalBinary()
-	if err != nil {
-		return nil, err
-	}
-	copy(data, b)
-
-	b, err = h.Vel.MarshalBinary()
-	if err != nil {
-		return nil, err
-	}
-	copy(data[Vec2Size:], b)
-
-	b, err = h.Accel.MarshalBinary()
-	if err != nil {
-		return nil, err
-	}
-	copy(data[2*Vec2Size:], b)
-
-	_, err = binary.Encode(data[3*Vec2Size:], binary.BigEndian, h.Rotation)
-	if err != nil {
-		return nil, err
-	}
-
-	return data, nil
-}
-
-func (h *Movable) UnmarshalBinary(data []byte) error {
-	if l := len(data); l < MovableSize {
-		return fmt.Errorf("data length %d less than %d: %w", l, MovableSize, ErrShortData)
-	}
-
-	err := h.Trans.UnmarshalBinary(data)
-	if err != nil {
-		return err
-	}
-	err = h.Vel.UnmarshalBinary(data[Vec2Size:])
-	if err != nil {
-		return err
-	}
-	err = h.Accel.UnmarshalBinary(data[2*Vec2Size:])
-	if err != nil {
-		return err
-	}
-
-	_, err = binary.Decode(data[3*Vec2Size:], binary.BigEndian, &h.Rotation)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// MarshalBinary encodes Vec2 as two float64s in network order
-func (v Vec2) MarshalBinary() ([]byte, error) {
-	data := make([]byte, Vec2Size)
-	_, err := binary.Encode(data, binary.BigEndian, v.X)
-	if err != nil {
-		return nil, err
-	}
-	_, err = binary.Encode(data[8:], binary.BigEndian, v.Y)
-	if err != nil {
-		return nil, err
-	}
-	return data, nil
-}
-
-// UnmarshalBinary decodes two float64s from binary data
-func (v *Vec2) UnmarshalBinary(data []byte) error {
-	if l := len(data); l < Vec2Size {
-		return fmt.Errorf("data length %d less than %d: %w", l, Vec2Size, ErrShortData)
-	}
-	_, err := binary.Decode(data, binary.BigEndian, &v.X)
-	if err != nil {
-		return err
-	}
-	_, err = binary.Decode(data[8:], binary.BigEndian, &v.Y)
-	if err != nil {
-		return err
-	}
-	return nil
+	panic("TODO")
 }
