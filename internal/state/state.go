@@ -31,8 +31,11 @@ type Input struct {
 type State struct {
 	nextID   uint32
 	idToAddr map[uint32]string
-	Players  []Player
-	Bullets  []Bullet
+
+	Players []Player
+	Bullets []Bullet
+
+	lastBullet time.Time
 }
 
 func (s *State) AddPlayer(addr string) {
@@ -70,6 +73,7 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 		playerRotation = 0.3
 		playerAccel    = 500
 		playerMaxSpeed = 400
+		bulletCooldown = time.Second
 	)
 
 	dt := delta.Seconds()
@@ -102,7 +106,7 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 			player.Vel = player.Vel.Normalize().Mul(playerMaxSpeed)
 		}
 
-		if input.Space {
+		if input.Space && time.Since(s.lastBullet) > bulletCooldown {
 			s.Bullets = append(s.Bullets, Bullet{
 				Movable: Movable{
 					Trans:    player.Trans,
@@ -110,6 +114,7 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 					Rotation: rotation,
 				},
 			})
+			s.lastBullet = time.Now()
 		}
 	}
 
