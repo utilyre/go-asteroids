@@ -142,6 +142,7 @@ func init() {
 func (g *Game) Draw(screen *ebiten.Image) {
 	for _, bullet := range g.state.Bullets {
 		var m ebiten.GeoM
+		m.Scale(2, 2)
 		m.Translate(bullet.Trans.X, bullet.Trans.Y)
 		screen.DrawImage(g.imgBullet, &ebiten.DrawImageOptions{GeoM: m})
 	}

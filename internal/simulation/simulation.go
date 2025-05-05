@@ -155,6 +155,7 @@ func init() {
 func (sim *Simulation) Draw(screen *ebiten.Image) {
 	for _, bullet := range sim.state.Bullets {
 		var m ebiten.GeoM
+		m.Scale(2, 2)
 		m.Translate(bullet.Trans.X, bullet.Trans.Y)
 		screen.DrawImage(sim.imgBullet, &ebiten.DrawImageOptions{GeoM: m})
 	}
