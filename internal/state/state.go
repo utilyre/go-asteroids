@@ -65,6 +65,7 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 	const (
 		playerRotation = 0.3
 		playerAccel    = 500
+		playerMaxSpeed = 400
 	)
 
 	dt := delta.Seconds()
@@ -93,6 +94,9 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 		//                            π/2 - (-a) = π/2 + a
 		player.Trans = player.Accel.Mul(0.5 * dt * dt).Add(player.Vel.Mul(dt)).Add(player.Trans)
 		player.Vel = player.Accel.Mul(dt).Add(player.Vel)
+		if player.Vel.Magnitude() > playerMaxSpeed {
+			player.Vel = player.Vel.Normalize().Mul(playerMaxSpeed)
+		}
 	}
 }
 
@@ -204,11 +208,15 @@ func (v Vec2) Rotate(rotation float64) Vec2 {
 	return v
 }
 
+func (v Vec2) Magnitude() float64 {
+	return math.Sqrt(v.X*v.X + v.Y*v.Y)
+}
+
 func (v Vec2) Normalize() Vec2 {
 	if v.X == 0 && v.Y == 0 {
 		return v
 	}
-	l := math.Sqrt(v.X*v.X + v.Y*v.Y)
+	l := v.Magnitude()
 	v.X /= l
 	v.Y /= l
 	return v
