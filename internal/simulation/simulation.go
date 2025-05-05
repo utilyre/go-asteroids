@@ -26,6 +26,7 @@ type Simulation struct {
 	lastStateIndex uint32
 
 	newAddrCh chan string
+	rmAddrCh  chan string
 }
 
 func New(laddr string, imgPlayer, imgBullet, imgRock *ebiten.Image) (*Simulation, error) {
@@ -45,6 +46,7 @@ func New(laddr string, imgPlayer, imgBullet, imgRock *ebiten.Image) (*Simulation
 		state:          state.InitState(),
 		lastStateIndex: 0,
 		newAddrCh:      make(chan string, 10),
+		rmAddrCh:       make(chan string, 10),
 	}
 	go sim.acceptLoop(context.Background())
 	return sim, nil
@@ -117,12 +119,12 @@ func (sim *Simulation) acceptLoop(ctx context.Context) {
 			sim.clientLock.Lock()
 			delete(sim.clients, raddr)
 			sim.clientLock.Unlock()
+			sim.rmAddrCh <- raddr
 		}()
 
 		sim.clientLock.Lock()
 		sim.clients[raddr] = client
 		sim.clientLock.Unlock()
-
 		sim.newAddrCh <- raddr
 	}
 }
@@ -166,6 +168,15 @@ OUTER:
 			sim.state.AddPlayer(addr)
 		default:
 			break OUTER
+		}
+	}
+OUTER2:
+	for {
+		select {
+		case addr := <-sim.rmAddrCh:
+			sim.state.RemovePlayer(addr)
+		default:
+			break OUTER2
 		}
 	}
 

@@ -45,6 +45,22 @@ func (s *State) AddPlayer(addr string) {
 	s.nextID++
 }
 
+func (s *State) RemovePlayer(addr string) {
+	var id uint32
+	for i := range len(s.Players) {
+		if currentID := s.Players[i].ID; s.idToAddr[currentID] == addr {
+			s.Players = append(s.Players[:i], s.Players[i+1:]...)
+			id = currentID
+			break
+		}
+	}
+	if id == 0 {
+		return
+	}
+
+	delete(s.idToAddr, id)
+}
+
 func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 	const (
 		playerRotation = 0.3
@@ -93,7 +109,10 @@ func (p Player) Lerp(other Player, t float64) Player {
 }
 
 func InitState() State {
-	return State{idToAddr: map[uint32]string{}}
+	return State{
+		nextID:   1,
+		idToAddr: map[uint32]string{},
+	}
 }
 
 func (s State) Lerp(other State, t float64) State {
