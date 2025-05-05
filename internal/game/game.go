@@ -1,6 +1,7 @@
 package game
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -14,7 +15,8 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
+	"github.com/hajimehoshi/ebiten/v2/examples/resources/fonts"
+	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
 type snapshot struct {
@@ -127,6 +129,16 @@ func (g *Game) Layout(int, int) (int, int) {
 	return state.ScreenWidth, state.ScreenHeight
 }
 
+var textFaceSource *text.GoTextFaceSource
+
+func init() {
+	s, err := text.NewGoTextFaceSource(bytes.NewReader(fonts.MPlus1pRegular_ttf))
+	if err != nil {
+		panic(err)
+	}
+	textFaceSource = s
+}
+
 func (g *Game) Draw(screen *ebiten.Image) {
 	for _, player := range g.state.Players {
 		var m ebiten.GeoM
@@ -141,7 +153,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		screen.DrawImage(g.imgPlayer, &ebiten.DrawImageOptions{
 			GeoM: m,
 		})
-		ebitenutil.DebugPrintAt(screen, fmt.Sprintf("%d", player.ID), int(player.Trans.X), int(player.Trans.Y-state.PlayerHeight))
+
+		op := &text.DrawOptions{}
+		op.GeoM.Translate(player.Trans.X-state.PlayerWidth, player.Trans.Y-state.PlayerHeight)
+		text.Draw(screen, fmt.Sprintf("%d", player.ID), &text.GoTextFace{Source: textFaceSource, Size: 50}, op)
 	}
 }
 
