@@ -24,19 +24,23 @@ type Input struct {
 }
 
 type State struct {
-	Players []Player
+	nextID   uint32
+	idToAddr map[uint32]string
+	Players  []Player
 }
 
 func (s *State) AddPlayer(addr string) {
+	s.idToAddr[s.nextID] = addr
 	s.Players = append(s.Players, Player{
+		ID: s.nextID,
 		Movable: Movable{
 			Trans:    Vec2{PlayerSize, PlayerSize},
 			Vel:      Vec2{},
 			Accel:    Vec2{},
 			Rotation: 0,
 		},
-		addr: addr,
 	})
+	s.nextID++
 }
 
 func (s *State) Update(delta time.Duration, inputs map[string]Input) {
@@ -49,7 +53,7 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 
 	for i := range len(s.Players) {
 		player := &s.Players[i]
-		input := inputs[player.addr]
+		input := inputs[s.idToAddr[player.ID]]
 
 		forward := 0.0
 		rotation := 0.0
@@ -77,7 +81,7 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 const StateSize = MovableSize
 
 type Player struct {
-	addr string
+	ID uint32
 	Movable
 }
 
