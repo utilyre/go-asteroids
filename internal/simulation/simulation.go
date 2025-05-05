@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"log/slog"
 	"multiplayer/internal/jitter"
 	"multiplayer/internal/mcp"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 )
 
 type Simulation struct {
@@ -152,6 +154,7 @@ func (sim *Simulation) Draw(screen *ebiten.Image) {
 		screen.DrawImage(sim.imgPlayer, &ebiten.DrawImageOptions{
 			GeoM: m,
 		})
+		ebitenutil.DebugPrintAt(screen, fmt.Sprintf("%d", player.ID), int(player.Trans.X), int(player.Trans.Y-state.PlayerHeight))
 	}
 }
 

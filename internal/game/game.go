@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	_ "image/png"
 	"log/slog"
 	"multiplayer/internal/jitter"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 )
 
 type snapshot struct {
@@ -139,6 +141,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		screen.DrawImage(g.imgPlayer, &ebiten.DrawImageOptions{
 			GeoM: m,
 		})
+		ebitenutil.DebugPrintAt(screen, fmt.Sprintf("%d", player.ID), int(player.Trans.X), int(player.Trans.Y-state.PlayerHeight))
 	}
 }
 
