@@ -1,10 +1,13 @@
 package state
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
+	"slices"
 	"time"
 )
 
@@ -29,6 +32,7 @@ type State struct {
 	nextID   uint32
 	idToAddr map[uint32]string
 	Players  []Player
+	Bullets  []Bullet
 }
 
 func (s *State) AddPlayer(addr string) {
@@ -97,7 +101,40 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 		if player.Vel.Magnitude() > playerMaxSpeed {
 			player.Vel = player.Vel.Normalize().Mul(playerMaxSpeed)
 		}
+
+		if input.Space {
+			s.Bullets = append(s.Bullets, Bullet{
+				Movable: Movable{
+					Trans:    player.Trans,
+					Vel:      HeadVec2(0.5*math.Pi + player.Rotation).Mul(-600),
+					Rotation: rotation,
+				},
+			})
+		}
 	}
+
+	var bulletIndicesToRemove []int
+	for i := range len(s.Bullets) {
+		bullet := &s.Bullets[i]
+		bullet.Trans = bullet.Vel.Mul(dt).Add(bullet.Trans)
+		if bullet.Trans.X < 0 || bullet.Trans.X > ScreenWidth || bullet.Trans.Y < 0 || bullet.Trans.Y > ScreenHeight {
+			bulletIndicesToRemove = append(bulletIndicesToRemove, i)
+		}
+	}
+	for _, index := range slices.Backward(bulletIndicesToRemove) {
+		s.Bullets = append(s.Bullets[:index], s.Bullets[index+1:]...)
+	}
+}
+
+const BulletSize = MovableSize
+
+type Bullet struct {
+	Movable
+}
+
+func (b Bullet) Lerp(other Bullet, t float64) Bullet {
+	b.Movable = b.Movable.Lerp(other.Movable, t)
+	return b
 }
 
 const PlayerSize = 4 + MovableSize
@@ -120,7 +157,7 @@ func InitState() State {
 }
 
 func (s State) Lerp(other State, t float64) State {
-	if len(s.Players) != len(other.Players) {
+	if len(s.Players) != len(other.Players) || len(s.Bullets) != len(other.Bullets) {
 		// TODO: fault tolerate this
 		// panic("current and other state do not have the same number of players")
 		return s
@@ -129,6 +166,10 @@ func (s State) Lerp(other State, t float64) State {
 	for i, rplayer := range other.Players {
 		player := &s.Players[i]
 		*player = player.Lerp(rplayer, t)
+	}
+	for i, rbullet := range other.Bullets {
+		bullet := &s.Bullets[i]
+		*bullet = bullet.Lerp(rbullet, t)
 	}
 	return s
 }
@@ -256,34 +297,56 @@ func (i *Input) UnmarshalBinary(data []byte) error {
 }
 
 func (s State) MarshalBinary() ([]byte, error) {
-	data := make([]byte, 8+PlayerSize*len(s.Players))
-	binary.BigEndian.PutUint64(data, uint64(len(s.Players)))
-	_, err := binary.Encode(data[8:], binary.BigEndian, s.Players)
+	data := make([]byte, 0, 8+PlayerSize*len(s.Players)+BulletSize*len(s.Bullets))
+	buf := bytes.NewBuffer(data)
+
+	err := binary.Write(buf, binary.BigEndian, uint64(len(s.Players)))
 	if err != nil {
 		return nil, err
 	}
-	return data, nil
+
+	err = binary.Write(buf, binary.BigEndian, s.Players)
+	if err != nil {
+		return nil, err
+	}
+
+	err = binary.Write(buf, binary.BigEndian, uint64(len(s.Bullets)))
+	if err != nil {
+		return nil, err
+	}
+	err = binary.Write(buf, binary.BigEndian, s.Bullets)
+	if err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
 }
 
 func (s *State) UnmarshalBinary(data []byte) error {
-	if l, expected := len(data), 8; l < expected {
-		return fmt.Errorf("data length %d less than %d: %w", l, expected, ErrShortData)
-	}
+	slog.Debug("length of data passed to unmarshal binary", "len", len(data))
+	r := bytes.NewReader(data)
 
-	playersLen := binary.BigEndian.Uint64(data)
-	if l, expected := len(data), 8+PlayerSize*playersLen; uint64(l) < expected {
-		return fmt.Errorf("data length %d less than %d: %w", l, expected, ErrShortData)
-	}
-
-	s.Players = make([]Player, playersLen)
-	_, err := binary.Decode(data[8:], binary.BigEndian, s.Players)
+	var playersLen uint64
+	err := binary.Read(r, binary.BigEndian, &playersLen)
 	if err != nil {
 		return err
 	}
-	/* TODO: figure out why this always panics
-	if expected := PlayerSize * playersLen; uint64(n) != expected {
-		panic(fmt.Sprintf("consumed %d bytes which is less than %d", s.Players, n, expected))
-	} */
+	s.Players = make([]Player, playersLen)
+	err = binary.Read(r, binary.BigEndian, s.Players)
+	if err != nil {
+		return err
+	}
+
+	var bulletsLen uint64
+	err = binary.Read(r, binary.BigEndian, &bulletsLen)
+	if err != nil {
+		return err
+	}
+	s.Bullets = make([]Bullet, bulletsLen)
+	err = binary.Read(r, binary.BigEndian, s.Bullets)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }

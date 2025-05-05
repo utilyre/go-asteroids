@@ -153,6 +153,12 @@ func init() {
 }
 
 func (sim *Simulation) Draw(screen *ebiten.Image) {
+	for _, bullet := range sim.state.Bullets {
+		var m ebiten.GeoM
+		m.Translate(bullet.Trans.X, bullet.Trans.Y)
+		screen.DrawImage(sim.imgBullet, &ebiten.DrawImageOptions{GeoM: m})
+	}
+
 	for _, player := range sim.state.Players {
 		var m ebiten.GeoM
 		bounds := sim.imgPlayer.Bounds()

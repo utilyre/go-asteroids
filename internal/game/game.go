@@ -140,6 +140,12 @@ func init() {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
+	for _, bullet := range g.state.Bullets {
+		var m ebiten.GeoM
+		m.Translate(bullet.Trans.X, bullet.Trans.Y)
+		screen.DrawImage(g.imgBullet, &ebiten.DrawImageOptions{GeoM: m})
+	}
+
 	for _, player := range g.state.Players {
 		var m ebiten.GeoM
 		bounds := g.imgPlayer.Bounds()
@@ -166,6 +172,7 @@ func (g *Game) Update() error {
 		Down:  ebiten.IsKeyPressed(ebiten.KeyS),
 		Up:    ebiten.IsKeyPressed(ebiten.KeyW),
 		Right: ebiten.IsKeyPressed(ebiten.KeyD),
+		Space: ebiten.IsKeyPressed(ebiten.KeySpace),
 	}
 
 	g.inputBufferLock.Lock()
