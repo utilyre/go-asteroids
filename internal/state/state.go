@@ -1,6 +1,7 @@
 package state
 
 import (
+	"encoding/binary"
 	"errors"
 	"math"
 	"time"
@@ -20,6 +21,10 @@ const InputSize = 1
 type Input struct {
 	Left, Down, Up, Right bool
 	Space                 bool
+}
+
+type State struct {
+	Players []Player
 }
 
 func (s *State) AddPlayer(addr string) {
@@ -70,10 +75,6 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 }
 
 const StateSize = MovableSize
-
-type State struct {
-	Players []Player
-}
 
 type Player struct {
 	addr string
@@ -184,6 +185,20 @@ func (v Vec2) Normalize() Vec2 {
 	v.X /= l
 	v.Y /= l
 	return v
+}
+
+func (i Input) MarshalBinary() ([]byte, error) {
+	data := make([]byte, 1)
+	_, err := binary.Encode(data, binary.BigEndian, i)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func (i *Input) UnmarshalBinary(data []byte) error {
+	_, err := binary.Decode(data, binary.BigEndian, i)
+	return err
 }
 
 func (s State) MarshalBinary() ([]byte, error) {
