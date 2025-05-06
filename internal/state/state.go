@@ -28,8 +28,8 @@ type Input struct {
 }
 
 type State struct {
-	nextID   uint32
-	idToAddr map[uint32]string
+	nextID   uint16
+	idToAddr map[uint16]string
 
 	Players []Player
 	Bullets []Bullet
@@ -50,7 +50,7 @@ func (s *State) AddPlayer(addr string) {
 }
 
 func (s *State) RemovePlayer(addr string) {
-	var id uint32
+	var id uint16
 	for i := range len(s.Players) {
 		if currentID := s.Players[i].ID; s.idToAddr[currentID] == addr {
 			s.Players = append(s.Players[:i], s.Players[i+1:]...)
@@ -95,7 +95,7 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 			rotation += 1
 		}
 
-		player.Rotation += playerRotation * rotation
+		player.Rotation = wrapAngle(playerRotation*rotation + player.Rotation)
 		player.Accel = HeadVec2(0.5*math.Pi + player.Rotation).Mul(playerAccel * forward)
 		//                            π/2 - (-a) = π/2 + a
 		player.Trans = player.Accel.Mul(0.5 * dt * dt).Add(player.Vel.Mul(dt)).Add(player.Trans)
@@ -143,7 +143,7 @@ func (b Bullet) Lerp(other Bullet, t float64) Bullet {
 const PlayerSize = 4 + 3*Vec2Size + 8
 
 type Player struct {
-	ID       uint32
+	ID       uint16
 	Trans    Vec2
 	Vel      Vec2
 	Accel    Vec2
@@ -152,14 +152,14 @@ type Player struct {
 
 func (p Player) Lerp(other Player, t float64) Player {
 	p.Trans = p.Trans.Lerp(other.Trans, t)
-	p.Rotation = lerp(p.Rotation, other.Rotation, t)
+	p.Rotation = rlerp(p.Rotation, other.Rotation, t)
 	return p
 }
 
 func InitState() State {
 	return State{
 		nextID:   1,
-		idToAddr: map[uint32]string{},
+		idToAddr: map[uint16]string{},
 	}
 }
 
@@ -202,6 +202,21 @@ func signum(x float64) float64 {
 		return -1
 	}
 	return 0
+}
+
+func wrapAngle(angle float64) float64 {
+	// Wrap angle to [-π, π]
+	wrapped := math.Mod(angle+math.Pi, 2*math.Pi)
+	if wrapped < 0 {
+		wrapped += 2 * math.Pi
+	}
+	return wrapped - math.Pi
+}
+
+func rlerp(a, b, t float64) float64 {
+	x := lerp(math.Cos(a), math.Cos(b), t)
+	y := lerp(math.Sin(a), math.Sin(b), t)
+	return math.Atan2(y, x)
 }
 
 func lerp(a, b, t float64) float64 {
@@ -292,7 +307,7 @@ func (s State) MarshalBinary() ([]byte, error) {
 	data := make([]byte, 0, 8+PlayerSize*len(s.Players)+8+BulletSize*len(s.Bullets))
 	buf := bytes.NewBuffer(data)
 
-	err := binary.Write(buf, binary.BigEndian, uint64(len(s.Players)))
+	err := binary.Write(buf, binary.BigEndian, uint16(len(s.Players)))
 	if err != nil {
 		return nil, err
 	}
@@ -302,12 +317,15 @@ func (s State) MarshalBinary() ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		// x = [0, 1920)
-		err = binary.Write(buf, binary.BigEndian, player.Trans)
+		err = binary.Write(buf, binary.BigEndian, uint16(player.Trans.X))
 		if err != nil {
 			return nil, err
 		}
-		err = binary.Write(buf, binary.BigEndian, player.Rotation)
+		err = binary.Write(buf, binary.BigEndian, uint16(player.Trans.Y))
+		if err != nil {
+			return nil, err
+		}
+		err = binary.Write(buf, binary.BigEndian, float32(player.Rotation))
 		if err != nil {
 			return nil, err
 		}
@@ -328,7 +346,7 @@ func (s State) MarshalBinary() ([]byte, error) {
 func (s *State) UnmarshalBinary(data []byte) error {
 	r := bytes.NewReader(data)
 
-	var playersLen uint64
+	var playersLen uint16
 	err := binary.Read(r, binary.BigEndian, &playersLen)
 	if err != nil {
 		return err
@@ -339,14 +357,24 @@ func (s *State) UnmarshalBinary(data []byte) error {
 		if err != nil {
 			return err
 		}
-		err = binary.Read(r, binary.BigEndian, &s.Players[i].Trans)
+		var tx uint16
+		err = binary.Read(r, binary.BigEndian, &tx)
 		if err != nil {
 			return err
 		}
-		err = binary.Read(r, binary.BigEndian, &s.Players[i].Rotation)
+		s.Players[i].Trans.X = float64(tx)
+		var ty uint16
+		err = binary.Read(r, binary.BigEndian, &ty)
 		if err != nil {
 			return err
 		}
+		s.Players[i].Trans.Y = float64(ty)
+		var rotation float32
+		err = binary.Read(r, binary.BigEndian, &rotation)
+		if err != nil {
+			return err
+		}
+		s.Players[i].Rotation = float64(rotation)
 	}
 
 	var bulletsLen uint64
