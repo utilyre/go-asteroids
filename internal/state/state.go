@@ -41,13 +41,11 @@ type State struct {
 func (s *State) AddPlayer(addr string) {
 	s.idToAddr[s.nextID] = addr
 	s.Players = append(s.Players, Player{
-		ID: s.nextID,
-		Movable: Movable{
-			Trans:    Vec2{PlayerWidth, PlayerWidth},
-			Vel:      Vec2{},
-			Accel:    Vec2{},
-			Rotation: 0,
-		},
+		ID:       s.nextID,
+		Trans:    Vec2{PlayerWidth, PlayerWidth},
+		Vel:      Vec2{},
+		Accel:    Vec2{},
+		Rotation: 0,
 	})
 	s.nextID++
 }
@@ -73,7 +71,8 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 		playerRotation = 0.3
 		playerAccel    = 500
 		playerMaxSpeed = 400
-		bulletCooldown = time.Second
+		bulletSpeed    = 600
+		bulletCooldown = time.Second / 4
 	)
 
 	dt := delta.Seconds()
@@ -108,11 +107,8 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 
 		if input.Space && time.Since(s.lastBullet) > bulletCooldown {
 			s.Bullets = append(s.Bullets, Bullet{
-				Movable: Movable{
-					Trans:    player.Trans,
-					Vel:      HeadVec2(0.5*math.Pi + player.Rotation).Mul(-600),
-					Rotation: rotation,
-				},
+				Trans:    player.Trans,
+				Rotation: player.Rotation,
 			})
 			s.lastBullet = time.Now()
 		}
@@ -121,7 +117,7 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 	var bulletIndicesToRemove []int
 	for i := range len(s.Bullets) {
 		bullet := &s.Bullets[i]
-		bullet.Trans = bullet.Vel.Mul(dt).Add(bullet.Trans)
+		bullet.Trans = HeadVec2(1.5*math.Pi + bullet.Rotation).Mul(bulletSpeed * dt).Add(bullet.Trans)
 		if bullet.Trans.X < 0 || bullet.Trans.X > ScreenWidth || bullet.Trans.Y < 0 || bullet.Trans.Y > ScreenHeight {
 			bulletIndicesToRemove = append(bulletIndicesToRemove, i)
 		}
@@ -131,26 +127,31 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 	}
 }
 
-const BulletSize = MovableSize
+const BulletSize = 2 * Vec2Size
 
 type Bullet struct {
-	Movable
+	Trans    Vec2
+	Rotation float64
 }
 
 func (b Bullet) Lerp(other Bullet, t float64) Bullet {
-	b.Movable = b.Movable.Lerp(other.Movable, t)
+	b.Trans = b.Trans.Lerp(other.Trans, t)
 	return b
 }
 
-const PlayerSize = 4 + MovableSize
+const PlayerSize = 4 + 3*Vec2Size + 8
 
 type Player struct {
-	ID uint32
-	Movable
+	ID       uint32
+	Trans    Vec2
+	Vel      Vec2
+	Accel    Vec2
+	Rotation float64
 }
 
 func (p Player) Lerp(other Player, t float64) Player {
-	p.Movable = p.Movable.Lerp(other.Movable, t)
+	p.Trans = p.Trans.Lerp(other.Trans, t)
+	p.Rotation = lerp(p.Rotation, other.Rotation, t)
 	return p
 }
 
@@ -179,23 +180,6 @@ func (s State) Lerp(other State, t float64) State {
 	}
 
 	return s
-}
-
-const MovableSize = 3*Vec2Size + 16
-
-type Movable struct {
-	Trans    Vec2
-	Vel      Vec2
-	Accel    Vec2
-	Rotation float64
-}
-
-func (m Movable) Lerp(other Movable, t float64) Movable {
-	m.Trans = m.Trans.Lerp(other.Trans, t)
-	m.Vel = m.Vel.Lerp(other.Vel, t)
-	m.Accel = m.Accel.Lerp(other.Accel, t)
-	m.Rotation = lerp(m.Rotation, other.Rotation, t)
-	return m
 }
 
 const Vec2Size = 16
@@ -304,7 +288,7 @@ func (i *Input) UnmarshalBinary(data []byte) error {
 }
 
 func (s State) MarshalBinary() ([]byte, error) {
-	data := make([]byte, 0, 8+PlayerSize*len(s.Players)+BulletSize*len(s.Bullets))
+	data := make([]byte, 0, 8+PlayerSize*len(s.Players)+8+BulletSize*len(s.Bullets))
 	buf := bytes.NewBuffer(data)
 
 	err := binary.Write(buf, binary.BigEndian, uint64(len(s.Players)))
@@ -312,9 +296,19 @@ func (s State) MarshalBinary() ([]byte, error) {
 		return nil, err
 	}
 
-	err = binary.Write(buf, binary.BigEndian, s.Players)
-	if err != nil {
-		return nil, err
+	for _, player := range s.Players {
+		err = binary.Write(buf, binary.BigEndian, player.ID)
+		if err != nil {
+			return nil, err
+		}
+		err = binary.Write(buf, binary.BigEndian, player.Trans)
+		if err != nil {
+			return nil, err
+		}
+		err = binary.Write(buf, binary.BigEndian, player.Rotation)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	err = binary.Write(buf, binary.BigEndian, uint64(len(s.Bullets)))
@@ -339,9 +333,19 @@ func (s *State) UnmarshalBinary(data []byte) error {
 		return err
 	}
 	s.Players = make([]Player, playersLen)
-	err = binary.Read(r, binary.BigEndian, s.Players)
-	if err != nil {
-		return err
+	for i := range playersLen {
+		err = binary.Read(r, binary.BigEndian, &s.Players[i].ID)
+		if err != nil {
+			return err
+		}
+		err = binary.Read(r, binary.BigEndian, &s.Players[i].Trans)
+		if err != nil {
+			return err
+		}
+		err = binary.Read(r, binary.BigEndian, &s.Players[i].Rotation)
+		if err != nil {
+			return err
+		}
 	}
 
 	var bulletsLen uint64
