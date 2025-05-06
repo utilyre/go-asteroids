@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"log/slog"
 	"math"
 	"slices"
 	"time"
@@ -100,6 +99,8 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 		player.Accel = HeadVec2(0.5*math.Pi + player.Rotation).Mul(playerAccel * forward)
 		//                            π/2 - (-a) = π/2 + a
 		player.Trans = player.Accel.Mul(0.5 * dt * dt).Add(player.Vel.Mul(dt)).Add(player.Trans)
+		player.Trans.X = max(0, min(ScreenWidth, player.Trans.X))
+		player.Trans.Y = max(0, min(ScreenHeight, player.Trans.Y))
 		player.Vel = player.Accel.Mul(dt).Add(player.Vel)
 		if player.Vel.Magnitude() > playerMaxSpeed {
 			player.Vel = player.Vel.Normalize().Mul(playerMaxSpeed)
@@ -301,6 +302,7 @@ func (s State) MarshalBinary() ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
+		// x = [0, 1920)
 		err = binary.Write(buf, binary.BigEndian, player.Trans)
 		if err != nil {
 			return nil, err
@@ -324,7 +326,6 @@ func (s State) MarshalBinary() ([]byte, error) {
 }
 
 func (s *State) UnmarshalBinary(data []byte) error {
-	slog.Debug("length of data passed to unmarshal binary", "len", len(data))
 	r := bytes.NewReader(data)
 
 	var playersLen uint64
