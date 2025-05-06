@@ -28,8 +28,9 @@ type Input struct {
 }
 
 type State struct {
-	nextID   uint16
-	idToAddr map[uint16]string
+	nextPlayerID uint16
+	nextBulletID uint32
+	idToAddr     map[uint16]string
 
 	Players []Player
 	Bullets []Bullet
@@ -38,15 +39,15 @@ type State struct {
 }
 
 func (s *State) AddPlayer(addr string) {
-	s.idToAddr[s.nextID] = addr
+	s.idToAddr[s.nextPlayerID] = addr
 	s.Players = append(s.Players, Player{
-		ID:       s.nextID,
+		ID:       s.nextPlayerID,
 		Trans:    Vec2{PlayerWidth, PlayerWidth},
 		Vel:      Vec2{},
 		Accel:    Vec2{},
 		Rotation: 0,
 	})
-	s.nextID++
+	s.nextPlayerID++
 }
 
 func (s *State) RemovePlayer(addr string) {
@@ -108,9 +109,11 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 
 		if input.Space && time.Since(s.lastBullet) > bulletCooldown {
 			s.Bullets = append(s.Bullets, Bullet{
+				ID:       s.nextBulletID,
 				Trans:    player.Trans,
 				Rotation: player.Rotation,
 			})
+			s.nextBulletID++
 			s.lastBullet = time.Now()
 		}
 	}
@@ -131,6 +134,7 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 const BulletSize = 2 * Vec2Size
 
 type Bullet struct {
+	ID       uint32
 	Trans    Vec2
 	Rotation float64
 }
@@ -158,25 +162,50 @@ func (p Player) Lerp(other Player, t float64) Player {
 
 func InitState() State {
 	return State{
-		nextID:   1,
-		idToAddr: map[uint16]string{},
+		nextPlayerID: 1,
+		nextBulletID: 1,
+		idToAddr:     map[uint16]string{},
 	}
 }
 
 func (s State) Lerp(other State, t float64) State {
-	// TODO: figure out a way to interpolate even if there are removed/added elements
+	{
+		// Double pointer problem
+		//
+		// Example:
+		// 1, 2, 5, 6, 7, 10
+		// 2, 4, 5, 6, 8, 9
 
-	if len(s.Players) == len(other.Players) {
-		for i, rplayer := range other.Players {
-			player := &s.Players[i]
-			*player = player.Lerp(rplayer, t)
+		i, j := 0, 0
+		for i < len(s.Players) && j < len(other.Players) {
+			l := &s.Players[i]
+			r := &other.Players[j]
+			if l.ID < r.ID {
+				i++
+			} else if l.ID > r.ID {
+				j++
+			} else {
+				*l = l.Lerp(*r, t)
+				i++
+				j++
+			}
 		}
 	}
 
-	if len(s.Bullets) == len(other.Bullets) {
-		for i, rbullet := range other.Bullets {
-			bullet := &s.Bullets[i]
-			*bullet = bullet.Lerp(rbullet, t)
+	{
+		i, j := 0, 0
+		for i < len(s.Bullets) && j < len(other.Bullets) {
+			l := &s.Bullets[i]
+			r := &other.Bullets[j]
+			if l.ID < r.ID {
+				i++
+			} else if l.ID > r.ID {
+				j++
+			} else {
+				*l = l.Lerp(*r, t)
+				i++
+				j++
+			}
 		}
 	}
 
@@ -304,6 +333,7 @@ func (i *Input) UnmarshalBinary(data []byte) error {
 }
 
 func (s State) MarshalBinary() ([]byte, error) {
+	// TODO: allocating too much memory
 	data := make([]byte, 0, 8+PlayerSize*len(s.Players)+8+BulletSize*len(s.Bullets))
 	buf := bytes.NewBuffer(data)
 
@@ -336,6 +366,10 @@ func (s State) MarshalBinary() ([]byte, error) {
 		return nil, err
 	}
 	for _, bullet := range s.Bullets {
+		err = binary.Write(buf, binary.BigEndian, bullet.ID)
+		if err != nil {
+			return nil, err
+		}
 		err = binary.Write(buf, binary.BigEndian, uint16(bullet.Trans.X))
 		if err != nil {
 			return nil, err
@@ -394,6 +428,10 @@ func (s *State) UnmarshalBinary(data []byte) error {
 	}
 	s.Bullets = make([]Bullet, bulletsLen)
 	for i := range bulletsLen {
+		err = binary.Read(r, binary.BigEndian, &s.Bullets[i].ID)
+		if err != nil {
+			return err
+		}
 		var tx uint16
 		err = binary.Read(r, binary.BigEndian, &tx)
 		if err != nil {
