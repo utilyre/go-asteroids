@@ -333,52 +333,50 @@ func (i *Input) UnmarshalBinary(data []byte) error {
 }
 
 func (s State) MarshalBinary() ([]byte, error) {
-	// TODO: allocating too much memory
-	data := make([]byte, 0, 8+PlayerSize*len(s.Players)+8+BulletSize*len(s.Bullets))
-	buf := bytes.NewBuffer(data)
+	var buf bytes.Buffer
 
-	err := binary.Write(buf, binary.BigEndian, uint16(len(s.Players)))
+	err := binary.Write(&buf, binary.BigEndian, uint16(len(s.Players)))
 	if err != nil {
 		return nil, err
 	}
 
 	for _, player := range s.Players {
-		err = binary.Write(buf, binary.BigEndian, player.ID)
+		err = binary.Write(&buf, binary.BigEndian, player.ID)
 		if err != nil {
 			return nil, err
 		}
-		err = binary.Write(buf, binary.BigEndian, uint16(player.Trans.X))
+		err = binary.Write(&buf, binary.BigEndian, uint16(player.Trans.X))
 		if err != nil {
 			return nil, err
 		}
-		err = binary.Write(buf, binary.BigEndian, uint16(player.Trans.Y))
+		err = binary.Write(&buf, binary.BigEndian, uint16(player.Trans.Y))
 		if err != nil {
 			return nil, err
 		}
-		err = binary.Write(buf, binary.BigEndian, float32(player.Rotation))
+		err = binary.Write(&buf, binary.BigEndian, float32(player.Rotation))
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	err = binary.Write(buf, binary.BigEndian, uint16(len(s.Bullets)))
+	err = binary.Write(&buf, binary.BigEndian, uint16(len(s.Bullets)))
 	if err != nil {
 		return nil, err
 	}
 	for _, bullet := range s.Bullets {
-		err = binary.Write(buf, binary.BigEndian, bullet.ID)
+		err = binary.Write(&buf, binary.BigEndian, bullet.ID)
 		if err != nil {
 			return nil, err
 		}
-		err = binary.Write(buf, binary.BigEndian, uint16(bullet.Trans.X))
+		err = binary.Write(&buf, binary.BigEndian, uint16(bullet.Trans.X))
 		if err != nil {
 			return nil, err
 		}
-		err = binary.Write(buf, binary.BigEndian, uint16(bullet.Trans.Y))
+		err = binary.Write(&buf, binary.BigEndian, uint16(bullet.Trans.Y))
 		if err != nil {
 			return nil, err
 		}
-		err = binary.Write(buf, binary.BigEndian, float32(bullet.Rotation))
+		err = binary.Write(&buf, binary.BigEndian, float32(bullet.Rotation))
 		if err != nil {
 			return nil, err
 		}
