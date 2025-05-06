@@ -331,13 +331,23 @@ func (s State) MarshalBinary() ([]byte, error) {
 		}
 	}
 
-	err = binary.Write(buf, binary.BigEndian, uint64(len(s.Bullets)))
+	err = binary.Write(buf, binary.BigEndian, uint16(len(s.Bullets)))
 	if err != nil {
 		return nil, err
 	}
-	err = binary.Write(buf, binary.BigEndian, s.Bullets)
-	if err != nil {
-		return nil, err
+	for _, bullet := range s.Bullets {
+		err = binary.Write(buf, binary.BigEndian, uint16(bullet.Trans.X))
+		if err != nil {
+			return nil, err
+		}
+		err = binary.Write(buf, binary.BigEndian, uint16(bullet.Trans.Y))
+		if err != nil {
+			return nil, err
+		}
+		err = binary.Write(buf, binary.BigEndian, float32(bullet.Rotation))
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return buf.Bytes(), nil
@@ -377,15 +387,31 @@ func (s *State) UnmarshalBinary(data []byte) error {
 		s.Players[i].Rotation = float64(rotation)
 	}
 
-	var bulletsLen uint64
+	var bulletsLen uint16
 	err = binary.Read(r, binary.BigEndian, &bulletsLen)
 	if err != nil {
 		return err
 	}
 	s.Bullets = make([]Bullet, bulletsLen)
-	err = binary.Read(r, binary.BigEndian, s.Bullets)
-	if err != nil {
-		return err
+	for i := range bulletsLen {
+		var tx uint16
+		err = binary.Read(r, binary.BigEndian, &tx)
+		if err != nil {
+			return err
+		}
+		s.Bullets[i].Trans.X = float64(tx)
+		var ty uint16
+		err = binary.Read(r, binary.BigEndian, &ty)
+		if err != nil {
+			return err
+		}
+		s.Bullets[i].Trans.Y = float64(ty)
+		var rotation float32
+		err = binary.Read(r, binary.BigEndian, &rotation)
+		if err != nil {
+			return err
+		}
+		s.Bullets[i].Rotation = float64(rotation)
 	}
 
 	return nil
