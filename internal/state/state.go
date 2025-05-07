@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand/v2"
 	"slices"
 	"time"
 )
@@ -15,8 +16,12 @@ var ErrShortData = errors.New("short data")
 const (
 	ScreenWidth  = 1920
 	ScreenHeight = 1080
+
 	PlayerWidth  = 80
 	PlayerHeight = 80
+
+	AsteroidWidth  = 60
+	AsteroidHeight = 60
 )
 
 const InputSize = 1
@@ -28,14 +33,18 @@ type Input struct {
 }
 
 type State struct {
-	nextPlayerID uint16
-	nextBulletID uint32
-	idToAddr     map[uint16]string
+	nextPlayerID   uint16
+	nextBulletID   uint32
+	nextAsteroidID uint32
 
-	Players []Player
-	Bullets []Bullet
+	idToAddr map[uint16]string
 
-	lastBullet time.Time
+	Players   []Player
+	Bullets   []Bullet
+	Asteroids []Asteroid
+
+	lastBullet   time.Time
+	lastAsteroid time.Time
 }
 
 func (s *State) AddPlayer(addr string) {
@@ -68,11 +77,13 @@ func (s *State) RemovePlayer(addr string) {
 
 func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 	const (
-		playerRotation = 0.3
-		playerAccel    = 500
-		playerMaxSpeed = 400
-		bulletSpeed    = 600
-		bulletCooldown = time.Second / 4
+		playerRotation   = 0.3
+		playerAccel      = 500
+		playerMaxSpeed   = 400
+		bulletSpeed      = 600
+		bulletCooldown   = time.Second / 4
+		asteroidTimeout  = 5 * time.Second
+		asteroidDirRange = 0.75 * math.Pi
 	)
 
 	dt := delta.Seconds()
@@ -129,9 +140,61 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 	for _, index := range slices.Backward(bulletIndicesToRemove) {
 		s.Bullets = append(s.Bullets[:index], s.Bullets[index+1:]...)
 	}
+
+	if time.Since(s.lastAsteroid) > asteroidTimeout {
+		const (
+			top    = iota // up = -π/2
+			bottom        // down = π/2
+			left          // left = -π
+			right         // right = 0
+		)
+		var trans Vec2
+		var dir float64
+		switch rand.N(4) {
+		case top:
+			trans.X = ScreenWidth * rand.Float64()
+			trans.Y = 10
+			dir = asteroidDirRange*(rand.Float64()-0.5) + 0.5*math.Pi
+		case bottom:
+			trans.X = ScreenWidth * rand.Float64()
+			trans.Y = ScreenHeight - 10
+			dir = asteroidDirRange*(rand.Float64()-0.5) - 0.5*math.Pi
+		case left:
+			trans.X = 10
+			trans.Y = ScreenHeight * rand.Float64()
+			dir = asteroidDirRange * (rand.Float64() - 0.5)
+		case right:
+			trans.X = ScreenWidth - 10
+			trans.Y = ScreenHeight * rand.Float64()
+			dir = asteroidDirRange*(rand.Float64()-0.5) - math.Pi
+		}
+
+		s.Asteroids = append(s.Asteroids, Asteroid{
+			ID:       s.nextAsteroidID,
+			Trans:    trans,
+			Vel:      HeadVec2(dir).Mul(100),
+			AngVel:   math.Pi * (rand.Float64() - 0.5),
+			Rotation: 2 * math.Pi * (rand.Float64() - 0.5),
+		})
+		s.nextAsteroidID++
+		s.lastAsteroid = time.Now()
+	}
+
+	var asteroidIndicesToRemove []int
+	for i := range len(s.Asteroids) {
+		asteroid := &s.Asteroids[i]
+		asteroid.Trans = asteroid.Vel.Mul(dt).Add(asteroid.Trans)
+		asteroid.Rotation = wrapAngle(asteroid.AngVel*dt + asteroid.Rotation)
+		if asteroid.Trans.X < 0 || asteroid.Trans.X > ScreenWidth || asteroid.Trans.Y < 0 || asteroid.Trans.Y > ScreenHeight {
+			asteroidIndicesToRemove = append(asteroidIndicesToRemove, i)
+		}
+	}
+	for _, index := range slices.Backward(asteroidIndicesToRemove) {
+		s.Asteroids = append(s.Asteroids[:index], s.Asteroids[index+1:]...)
+	}
 }
 
-const BulletSize = 2 * Vec2Size
+const BulletSize = 4 + 2*Vec2Size
 
 type Bullet struct {
 	ID       uint32
@@ -142,6 +205,22 @@ type Bullet struct {
 func (b Bullet) Lerp(other Bullet, t float64) Bullet {
 	b.Trans = b.Trans.Lerp(other.Trans, t)
 	return b
+}
+
+const AsteroidSize = 4 + 2*Vec2Size
+
+type Asteroid struct {
+	ID       uint32
+	Trans    Vec2
+	Vel      Vec2
+	AngVel   float64
+	Rotation float64
+}
+
+func (a Asteroid) Lerp(other Asteroid, t float64) Asteroid {
+	a.Trans = a.Trans.Lerp(other.Trans, t)
+	a.Rotation = rlerp(a.Rotation, other.Rotation, t)
+	return a
 }
 
 const PlayerSize = 4 + 3*Vec2Size + 8
@@ -162,9 +241,10 @@ func (p Player) Lerp(other Player, t float64) Player {
 
 func InitState() State {
 	return State{
-		nextPlayerID: 1,
-		nextBulletID: 1,
-		idToAddr:     map[uint16]string{},
+		nextPlayerID:   1,
+		nextBulletID:   1,
+		nextAsteroidID: 1,
+		idToAddr:       map[uint16]string{},
 	}
 }
 

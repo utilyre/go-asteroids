@@ -147,6 +147,19 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		screen.DrawImage(g.imgBullet, &ebiten.DrawImageOptions{GeoM: m})
 	}
 
+	for _, asteroid := range g.state.Asteroids {
+		var m ebiten.GeoM
+		bounds := g.imgRock.Bounds()
+		m.Translate(-float64(bounds.Dx()/2), -float64(bounds.Dy()/2))
+		m.Rotate(asteroid.Rotation)
+		m.Scale(
+			state.AsteroidWidth/float64(bounds.Dx()),
+			state.AsteroidHeight/float64(bounds.Dy()),
+		)
+		m.Translate(asteroid.Trans.X, asteroid.Trans.Y)
+		screen.DrawImage(g.imgRock, &ebiten.DrawImageOptions{GeoM: m})
+	}
+
 	for _, player := range g.state.Players {
 		var m ebiten.GeoM
 		bounds := g.imgPlayer.Bounds()

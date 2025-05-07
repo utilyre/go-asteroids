@@ -160,6 +160,19 @@ func (sim *Simulation) Draw(screen *ebiten.Image) {
 		screen.DrawImage(sim.imgBullet, &ebiten.DrawImageOptions{GeoM: m})
 	}
 
+	for _, asteroid := range sim.state.Asteroids {
+		var m ebiten.GeoM
+		bounds := sim.imgRock.Bounds()
+		m.Translate(-float64(bounds.Dx()/2), -float64(bounds.Dy()/2))
+		m.Rotate(asteroid.Rotation)
+		m.Scale(
+			state.AsteroidWidth/float64(bounds.Dx()),
+			state.AsteroidHeight/float64(bounds.Dy()),
+		)
+		m.Translate(asteroid.Trans.X, asteroid.Trans.Y)
+		screen.DrawImage(sim.imgRock, &ebiten.DrawImageOptions{GeoM: m})
+	}
+
 	for _, player := range sim.state.Players {
 		var m ebiten.GeoM
 		bounds := sim.imgPlayer.Bounds()
