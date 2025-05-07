@@ -289,6 +289,23 @@ func (s State) Lerp(other State, t float64) State {
 		}
 	}
 
+	{
+		i, j := 0, 0
+		for i < len(s.Asteroids) && j < len(other.Asteroids) {
+			l := &s.Asteroids[i]
+			r := &other.Asteroids[j]
+			if l.ID < r.ID {
+				i++
+			} else if l.ID > r.ID {
+				j++
+			} else {
+				*l = l.Lerp(*r, t)
+				i++
+				j++
+			}
+		}
+	}
+
 	return s
 }
 
@@ -419,7 +436,6 @@ func (s State) MarshalBinary() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	for _, player := range s.Players {
 		err = binary.Write(&buf, binary.BigEndian, player.ID)
 		if err != nil {
@@ -457,6 +473,29 @@ func (s State) MarshalBinary() ([]byte, error) {
 			return nil, err
 		}
 		err = binary.Write(&buf, binary.BigEndian, float32(bullet.Rotation))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	err = binary.Write(&buf, binary.BigEndian, uint16(len(s.Asteroids)))
+	if err != nil {
+		return nil, err
+	}
+	for _, asteroid := range s.Asteroids {
+		err = binary.Write(&buf, binary.BigEndian, asteroid.ID)
+		if err != nil {
+			return nil, err
+		}
+		err = binary.Write(&buf, binary.BigEndian, uint16(asteroid.Trans.X))
+		if err != nil {
+			return nil, err
+		}
+		err = binary.Write(&buf, binary.BigEndian, uint16(asteroid.Trans.Y))
+		if err != nil {
+			return nil, err
+		}
+		err = binary.Write(&buf, binary.BigEndian, float32(asteroid.Rotation))
 		if err != nil {
 			return nil, err
 		}
@@ -528,6 +567,37 @@ func (s *State) UnmarshalBinary(data []byte) error {
 			return err
 		}
 		s.Bullets[i].Rotation = float64(rotation)
+	}
+
+	var asteroidsLen uint16
+	err = binary.Read(r, binary.BigEndian, &asteroidsLen)
+	if err != nil {
+		return err
+	}
+	s.Asteroids = make([]Asteroid, asteroidsLen)
+	for i := range asteroidsLen {
+		err = binary.Read(r, binary.BigEndian, &s.Asteroids[i].ID)
+		if err != nil {
+			return err
+		}
+		var tx uint16
+		err = binary.Read(r, binary.BigEndian, &tx)
+		if err != nil {
+			return err
+		}
+		s.Asteroids[i].Trans.X = float64(tx)
+		var ty uint16
+		err = binary.Read(r, binary.BigEndian, &ty)
+		if err != nil {
+			return err
+		}
+		s.Asteroids[i].Trans.Y = float64(ty)
+		var rotation float32
+		err = binary.Read(r, binary.BigEndian, &rotation)
+		if err != nil {
+			return err
+		}
+		s.Asteroids[i].Rotation = float64(rotation)
 	}
 
 	return nil
