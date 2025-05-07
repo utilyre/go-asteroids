@@ -76,7 +76,7 @@ func (s *State) RemovePlayer(addr string) {
 
 func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 	const (
-		playerRotation   = 0.3
+		playerAngVel     = 3
 		playerAccel      = 500
 		playerMaxSpeed   = 400
 		bulletSpeed      = 600
@@ -106,7 +106,7 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 			rotation += 1
 		}
 
-		player.Rotation = wrapAngle(playerRotation*rotation + player.Rotation)
+		player.Rotation = wrapAngle(playerAngVel*rotation*dt + player.Rotation)
 		player.Accel = HeadVec2(0.5*math.Pi + player.Rotation).Mul(playerAccel * forward)
 		//                            π/2 - (-a) = π/2 + a
 		player.Trans = player.Accel.Mul(0.5 * dt * dt).Add(player.Vel.Mul(dt)).Add(player.Trans)
