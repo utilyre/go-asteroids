@@ -110,8 +110,20 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 		player.Accel = HeadVec2(0.5*math.Pi + player.Rotation).Mul(playerAccel * forward)
 		//                            π/2 - (-a) = π/2 + a
 		player.Trans = player.Accel.Mul(0.5 * dt * dt).Add(player.Vel.Mul(dt)).Add(player.Trans)
-		player.Trans.X = max(0, min(ScreenWidth, player.Trans.X))
-		player.Trans.Y = max(0, min(ScreenHeight, player.Trans.Y))
+		if player.Trans.X < 0 {
+			player.Trans.X = 0
+			player.Vel.X = 0
+		} else if player.Trans.X > ScreenWidth {
+			player.Trans.X = ScreenWidth
+			player.Vel.X = 0
+		}
+		if player.Trans.Y < 0 {
+			player.Trans.Y = 0
+			player.Vel.Y = 0
+		} else if player.Trans.Y > ScreenHeight {
+			player.Trans.Y = ScreenHeight
+			player.Vel.Y = 0
+		}
 		player.Vel = player.Accel.Mul(dt).Add(player.Vel)
 		if player.Vel.Magnitude() > playerMaxSpeed {
 			player.Vel = player.Vel.Normalize().Mul(playerMaxSpeed)
