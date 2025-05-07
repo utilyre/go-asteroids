@@ -203,6 +203,24 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 	for _, index := range slices.Backward(asteroidIndicesToRemove) {
 		s.Asteroids = append(s.Asteroids[:index], s.Asteroids[index+1:]...)
 	}
+
+	// bullet-asteroid collision check
+	bulletIndicesToRemove = nil
+	asteroidIndicesToRemove = nil
+	for ibullet, bullet := range s.Bullets {
+		for iasteroid, asteroid := range s.Asteroids {
+			if bullet.Trans.Sub(asteroid.Trans).Magnitude() <= AsteroidWidth {
+				bulletIndicesToRemove = append(bulletIndicesToRemove, ibullet)
+				asteroidIndicesToRemove = append(asteroidIndicesToRemove, iasteroid)
+			}
+		}
+	}
+	for _, index := range slices.Backward(bulletIndicesToRemove) {
+		s.Bullets = append(s.Bullets[:index], s.Bullets[index+1:]...)
+	}
+	for _, index := range slices.Backward(asteroidIndicesToRemove) {
+		s.Asteroids = append(s.Asteroids[:index], s.Asteroids[index+1:]...)
+	}
 }
 
 const BulletSize = 4 + 2*Vec2Size
@@ -378,6 +396,12 @@ func (v Vec2) Lerp(other Vec2, t float64) Vec2 {
 func (v Vec2) Add(other Vec2) Vec2 {
 	v.X += other.X
 	v.Y += other.Y
+	return v
+}
+
+func (v Vec2) Sub(other Vec2) Vec2 {
+	v.X -= other.X
+	v.Y -= other.Y
 	return v
 }
 
