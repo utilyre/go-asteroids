@@ -43,7 +43,6 @@ type State struct {
 	Bullets   []Bullet
 	Asteroids []Asteroid
 
-	lastBullet   time.Time
 	lastAsteroid time.Time
 }
 
@@ -118,14 +117,14 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 			player.Vel = player.Vel.Normalize().Mul(playerMaxSpeed)
 		}
 
-		if input.Space && time.Since(s.lastBullet) > bulletCooldown {
+		if input.Space && time.Since(player.lastBullet) > bulletCooldown {
 			s.Bullets = append(s.Bullets, Bullet{
 				ID:       s.nextBulletID,
 				Trans:    player.Trans,
 				Rotation: player.Rotation,
 			})
 			s.nextBulletID++
-			s.lastBullet = time.Now()
+			player.lastBullet = time.Now()
 		}
 	}
 
@@ -231,6 +230,8 @@ type Player struct {
 	Vel      Vec2
 	Accel    Vec2
 	Rotation float64
+
+	lastBullet time.Time
 }
 
 func (p Player) Lerp(other Player, t float64) Player {
