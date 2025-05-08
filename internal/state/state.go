@@ -49,8 +49,11 @@ type State struct {
 func (s *State) AddPlayer(addr string) {
 	s.idToAddr[s.nextPlayerID] = addr
 	s.Players = append(s.Players, Player{
-		ID:       s.nextPlayerID,
-		Trans:    Vec2{PlayerWidth, PlayerWidth},
+		ID: s.nextPlayerID,
+		Trans: Vec2{
+			ScreenWidth * rand.Float64(),
+			ScreenHeight * rand.Float64(),
+		},
 		Vel:      Vec2{},
 		Accel:    Vec2{},
 		Rotation: 0,
