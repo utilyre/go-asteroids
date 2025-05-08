@@ -215,9 +215,11 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 			}
 		}
 	}
+	slices.Sort(bulletIndicesToRemove)
 	for _, index := range slices.Backward(bulletIndicesToRemove) {
 		s.Bullets = append(s.Bullets[:index], s.Bullets[index+1:]...)
 	}
+	slices.Sort(asteroidIndicesToRemove)
 	for _, index := range slices.Backward(asteroidIndicesToRemove) {
 		s.Asteroids = append(s.Asteroids[:index], s.Asteroids[index+1:]...)
 	}
