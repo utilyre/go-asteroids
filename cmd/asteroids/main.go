@@ -81,7 +81,7 @@ func listenAndSimulate(ctx context.Context, addr string, imgPlayer, imgBullet, i
 
 	ebiten.SetWindowTitle("Asteroids [SERVER]")
 	ebiten.SetWindowSize(640, 360)
-	ebiten.SetTPS(10)
+	ebiten.SetTPS(30)
 	err = ebiten.RunGame(sim)
 	if err != nil {
 		slog.Error("failed to run simulation as an ebiten game", "error", err)

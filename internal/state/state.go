@@ -80,12 +80,12 @@ func (s *State) RemovePlayer(addr string) {
 
 func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 	const (
-		playerAngVel     = 3
+		playerAngVel     = 2.5
 		playerAccel      = 500
 		playerMaxSpeed   = 400
-		bulletSpeed      = 600
-		bulletCooldown   = time.Second / 4
-		asteroidTimeout  = 5 * time.Second
+		bulletSpeed      = 1200
+		bulletCooldown   = 200 * time.Millisecond
+		asteroidTimeout  = 2 * time.Second
 		asteroidDirRange = 0.75 * math.Pi
 	)
 
