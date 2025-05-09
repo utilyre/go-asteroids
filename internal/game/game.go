@@ -1,20 +1,22 @@
 package game
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
-	"image"
+	"fmt"
 	_ "image/png"
 	"log/slog"
 	"multiplayer/internal/jitter"
 	"multiplayer/internal/mcp"
 	"multiplayer/internal/state"
-	"os"
 	"sync"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/examples/resources/fonts"
+	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
 type snapshot struct {
@@ -23,8 +25,11 @@ type snapshot struct {
 }
 
 type Game struct {
-	houseImg *ebiten.Image
-	sess     *mcp.Session
+	imgPlayer *ebiten.Image
+	imgBullet *ebiten.Image
+	imgRock   *ebiten.Image
+
+	sess *mcp.Session
 
 	inputBuffer     jitter.Buffer
 	inputBufferLock sync.Mutex
@@ -36,19 +41,16 @@ type Game struct {
 	snapshotLock   sync.Mutex
 }
 
-func New(ctx context.Context, raddr string) (*Game, error) {
-	houseImg, err := openImage("./assets/house.png")
-	if err != nil {
-		return nil, err
-	}
-
+func New(ctx context.Context, raddr string, imgPlayer, imgBullet, imgRock *ebiten.Image) (*Game, error) {
 	sess, err := mcp.Dial(ctx, raddr, mcp.WithLogger(slog.Default()))
 	if err != nil {
 		return nil, err
 	}
 
 	g := &Game{
-		houseImg:        ebiten.NewImageFromImage(houseImg),
+		imgPlayer:       imgPlayer,
+		imgBullet:       imgBullet,
+		imgRock:         imgRock,
 		sess:            sess,
 		inputBuffer:     jitter.Buffer{},
 		inputBufferLock: sync.Mutex{},
@@ -124,24 +126,74 @@ func (g *Game) Close(ctx context.Context) error {
 }
 
 func (g *Game) Layout(int, int) (int, int) {
-	return 640, 480
+	return state.ScreenWidth, state.ScreenHeight
+}
+
+var textFaceSource *text.GoTextFaceSource
+
+func init() {
+	s, err := text.NewGoTextFaceSource(bytes.NewReader(fonts.MPlus1pRegular_ttf))
+	if err != nil {
+		panic(err)
+	}
+	textFaceSource = s
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	var m ebiten.GeoM
-	m.Scale(0.2, 0.2)
-	m.Translate(g.state.House.Trans.X, g.state.House.Trans.Y)
-	screen.DrawImage(g.houseImg, &ebiten.DrawImageOptions{
-		GeoM: m,
-	})
+	for _, bullet := range g.state.Bullets {
+		var m ebiten.GeoM
+		m.Scale(2, 2)
+		m.Translate(bullet.Trans.X, bullet.Trans.Y)
+		screen.DrawImage(g.imgBullet, &ebiten.DrawImageOptions{GeoM: m})
+	}
+
+	for _, asteroid := range g.state.Asteroids {
+		var m ebiten.GeoM
+		bounds := g.imgRock.Bounds()
+		m.Translate(-float64(bounds.Dx()/2), -float64(bounds.Dy()/2))
+		m.Rotate(asteroid.Rotation)
+		m.Scale(
+			state.AsteroidWidth/float64(bounds.Dx()),
+			state.AsteroidHeight/float64(bounds.Dy()),
+		)
+		m.Translate(asteroid.Trans.X, asteroid.Trans.Y)
+		screen.DrawImage(g.imgRock, &ebiten.DrawImageOptions{GeoM: m})
+	}
+
+	for _, player := range g.state.Players {
+		var m ebiten.GeoM
+		bounds := g.imgPlayer.Bounds()
+		m.Translate(-float64(bounds.Dx()/2), -float64(bounds.Dy()/2))
+		m.Rotate(player.Rotation)
+		m.Scale(
+			state.PlayerWidth/float64(bounds.Dx()),
+			state.PlayerHeight/float64(bounds.Dy()),
+		)
+		m.Translate(player.Trans.X, player.Trans.Y)
+		screen.DrawImage(g.imgPlayer, &ebiten.DrawImageOptions{
+			GeoM: m,
+		})
+
+		op := &text.DrawOptions{}
+		op.GeoM.Translate(player.Trans.X-state.PlayerWidth, player.Trans.Y-state.PlayerHeight)
+		text.Draw(screen, fmt.Sprintf("%d", player.ID), &text.GoTextFace{Source: textFaceSource, Size: 50}, op)
+	}
+
+	text.Draw(
+		screen,
+		fmt.Sprintf("Total Score: %d", g.state.TotalScore),
+		&text.GoTextFace{Source: textFaceSource, Size: 60},
+		&text.DrawOptions{},
+	)
 }
 
 func (g *Game) Update() error {
 	input := state.Input{
-		Left:  ebiten.IsKeyPressed(ebiten.KeyH),
-		Down:  ebiten.IsKeyPressed(ebiten.KeyJ),
-		Up:    ebiten.IsKeyPressed(ebiten.KeyK),
-		Right: ebiten.IsKeyPressed(ebiten.KeyL),
+		Left:  ebiten.IsKeyPressed(ebiten.KeyA),
+		Down:  ebiten.IsKeyPressed(ebiten.KeyS),
+		Up:    ebiten.IsKeyPressed(ebiten.KeyW),
+		Right: ebiten.IsKeyPressed(ebiten.KeyD),
+		Space: ebiten.IsKeyPressed(ebiten.KeySpace),
 	}
 
 	g.inputBufferLock.Lock()
@@ -183,19 +235,4 @@ func (g *Game) Update() error {
 	g.snapshotLock.Unlock()
 
 	return nil
-}
-
-func openImage(name string) (img image.Image, err error) {
-	f, err := os.Open(name)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { err = errors.Join(err, f.Close()) }()
-
-	img, _, err = image.Decode(f)
-	if err != nil {
-		return nil, err
-	}
-
-	return img, nil
 }
