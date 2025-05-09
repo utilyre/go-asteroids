@@ -10,7 +10,10 @@ game engine. The networking layer is built from scratch over
 [UDP](https://en.wikipedia.org/wiki/User_Datagram_Protocol) for real-time online
 play.
 
-[How I Implemented Multiplayer from Scratch in Golang](https://youtu.be/G8nxQ9ESIFA)
+
+Check out my YouTube video, ["How I Implemented Multiplayer from Scratch in
+Golang"](https://youtu.be/G8nxQ9ESIFA), where I walk through the implementation
+details and explain my approach to synchronization using snapshot interpolation.
 
 ![demo](./demo.gif)
 
