@@ -18,7 +18,7 @@ details and explain my approach to synchronization using snapshot interpolation.
 
 ## Installation
 
-### 1. Install Ebiten Dependencies
+### 1. Installing Ebiten Dependencies
 
 Before running the game, you need to follow [Ebiten's installation
 guide](https://ebitengine.org/en/documents/install.html). If you plan to run
