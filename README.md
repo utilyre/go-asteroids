@@ -72,7 +72,23 @@ go run ./cmd/asteroids -connect ip.of.your.vps:3000
 
 ## How to Play
 
-TODO
+Take control of your ship and survive the asteroid field! Here's how to navigate
+and fight:
+
+### Controls
+
+- <kbd>W</kbd> – Thrust forward
+- <kbd>S</kbd> – Thrust backward
+- <kbd>A</kbd> – Rotate left
+- <kbd>D</kbd> – Rotate right
+- <kbd>Spacebar</kbd> – Fire your weapon
+
+### Objective
+
+- Destroy as many asteroids as you can without getting hit!
+- Stay agile and keep moving — survival depends on your reflexes and aim.
+
+Good luck, pilot! 🚀
 
 ## Resources
 
