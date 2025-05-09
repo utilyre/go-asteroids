@@ -96,3 +96,8 @@ I used the following materials during the development of this project:
 
 - [Networked Physics](https://gafferongames.com/categories/networked-physics)
 - [Network Programming with Go](https://amazon.com/Network-Programming-Go-Adam-Woodbeck/dp/1718500882)
+
+## License
+
+This project is licensed under the
+[MIT](https://github.com/utilyre/go-asteroids/blob/main/LICENSE) license.
