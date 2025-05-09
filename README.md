@@ -1,4 +1,4 @@
-# Multiplayer
+# Asteroids
 
 > [!WARNING]
 >
@@ -79,4 +79,4 @@ TODO
 I used the following materials during the development of this project.
 
 - [Networked Physics](https://gafferongames.com/categories/networked-physics)
-- [Network Programming with Go](https://www.amazon.com/Network-Programming-Go-Adam-Woodbeck/dp/1718500882)
+- [Network Programming with Go](https://amazon.com/Network-Programming-Go-Adam-Woodbeck/dp/1718500882)
