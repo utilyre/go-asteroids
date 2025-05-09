@@ -4,8 +4,10 @@
 >
 > This repository is a work-in-progress and is not yet production ready.
 
-Multiplayer online Asteroids game from scratch written in Golang, built on top
-of UDP.
+A classic [Asteroids](https://en.wikipedia.org/wiki/Asteroids_(video_game))-style
+multiplayer game implemented using the [Ebiten](https://ebitengine.org) game
+engine. The networking layer is built from scratch over UDP for real-time online
+play.
 
 [How I Implemented Multiplayer from Scratch in Golang](https://youtu.be/G8nxQ9ESIFA)
 
