@@ -10,7 +10,6 @@ game engine. The networking layer is built from scratch over
 [UDP](https://en.wikipedia.org/wiki/User_Datagram_Protocol) for real-time online
 play.
 
-
 Check out my YouTube video, ["How I Implemented Multiplayer from Scratch in
 Golang"](https://youtu.be/G8nxQ9ESIFA), where I walk through the implementation
 details and explain my approach to synchronization using snapshot interpolation.
@@ -22,7 +21,7 @@ details and explain my approach to synchronization using snapshot interpolation.
 ### 1. Install Ebiten Dependencies
 
 Before running the game, you need to follow [Ebiten's installation
-guide](https://ebitengine.org/en/documents/install.html). If you're plan to run
+guide](https://ebitengine.org/en/documents/install.html). If you plan to run
 the server on a VPS, make sure [Xvfb](https://en.wikipedia.org/wiki/Xvfb) is
 installed and properly configured.
 
