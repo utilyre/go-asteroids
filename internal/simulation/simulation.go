@@ -260,7 +260,5 @@ OUTER2:
 	}
 	sim.lastStateIndex++
 
-	slog.Debug("broadcasted state", "size", len(data))
-
 	return nil
 }
