@@ -392,16 +392,6 @@ func HeadVec2(angle float64) Vec2 {
 	}
 }
 
-func signum(x float64) float64 {
-	if x > 0 {
-		return 1
-	}
-	if x < 0 {
-		return -1
-	}
-	return 0
-}
-
 func wrapAngle(angle float64) float64 {
 	// Wrap angle to [-π, π]
 	wrapped := math.Mod(angle+math.Pi, 2*math.Pi)
