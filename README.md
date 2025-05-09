@@ -2,7 +2,7 @@
 
 > [!WARNING]
 >
-> This repository is a work-in-progress and is not production ready.
+> This repository is a work-in-progress and is not yet production ready.
 
 [How I Implemented Multiplayer from Scratch in Golang](https://youtu.be/G8nxQ9ESIFA)
 
