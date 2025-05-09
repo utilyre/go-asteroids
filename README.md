@@ -16,10 +16,9 @@ of UDP.
 ### 1. Install Ebiten Dependencies
 
 Before running the game, you need to follow [Ebiten's installation
-guide](https://ebitengine.org/en/documents/install.html).
-
-If you're plan to run the server on a VPS, make sure
-[Xvfb](https://en.wikipedia.org/wiki/Xvfb) is installed and properly configured.
+guide](https://ebitengine.org/en/documents/install.html). If you're plan to run
+the server on a VPS, make sure [Xvfb](https://en.wikipedia.org/wiki/Xvfb) is
+installed and properly configured.
 
 On Ubuntu/Debian systems, you can install it with:
 
