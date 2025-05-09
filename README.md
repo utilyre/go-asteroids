@@ -81,7 +81,7 @@ and fight:
 - <kbd>S</kbd> – Thrust backward
 - <kbd>A</kbd> – Rotate left
 - <kbd>D</kbd> – Rotate right
-- <kbd>Spacebar</kbd> – Fire your weapon
+- <kbd>Space</kbd> – Fire your weapon
 
 ### Objective
 
