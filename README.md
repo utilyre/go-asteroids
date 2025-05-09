@@ -5,8 +5,9 @@
 > This repository is a work-in-progress and is not yet production ready.
 
 A classic [Asteroids](https://en.wikipedia.org/wiki/Asteroids_(video_game))-style
-multiplayer game implemented using the [Ebiten](https://ebitengine.org) game
-engine. The networking layer is built from scratch over UDP for real-time online
+multiplayer game implemented using the [Ebiten](https://ebitengine.org)
+game engine. The networking layer is built from scratch over
+[UDP](https://en.wikipedia.org/wiki/User_Datagram_Protocol) for real-time online
 play.
 
 [How I Implemented Multiplayer from Scratch in Golang](https://youtu.be/G8nxQ9ESIFA)
