@@ -1,12 +1,15 @@
-![showcase](./showcase.png)
-
 # Multiplayer
 
 > [!WARNING]
 >
-> This repository is a work-in-progress and subject to ongoing updates.
+> This repository is a work-in-progress and is not production ready.
 
-Multiplayer online game from scratch.
+[How I Implemented Multiplayer from Scratch in Golang](https://youtu.be/G8nxQ9ESIFA)
+
+Multiplayer online Asteroids game from scratch written in Golang, built on top
+of UDP.
+
+![demo](./demo.gif)
 
 ## Development
 
