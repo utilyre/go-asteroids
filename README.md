@@ -11,37 +11,68 @@ of UDP.
 
 ![demo](./demo.gif)
 
-## Development
+## Installation
 
-1. [Install ebitengine dependencies][ebitengine_install].
+### 1. Install Ebiten Dependencies
 
-2. Run the server.
+Before running the game, you need to follow [Ebiten's installation
+guide](https://ebitengine.org/en/documents/install.html).
 
-   ```bash
-   go run ./cmd/server
-   ```
+If you're plan to run the server on a VPS, make sure
+[Xvfb](https://en.wikipedia.org/wiki/Xvfb) is installed and properly configured.
 
-3. In the server logs, there will be a line similar to the one below. Copy the
-   text that is in the place of `[ADDRESS]` for the next step.
+On Ubuntu/Debian systems, you can install it with:
 
-   ```
-	 11:10:53 INF bound udp/mcp listener address=[ADDRESS]
-	 ```
+```bash
+sudo apt-get update
+sudo apt-get install -y xvfb
+```
 
-3. In the following command, replace `<n>` with the number of clients you would
-   like to spawn. Also, paste what you copied from the previous step, replacing
-   `[ADDRESS]`, and then execute it.
+For other platforms, refer to your system's package manager.
 
-   ```bash
-   ./spawn_clients.sh <n> -remote=[ADDRESS]
-   ```
+### 2. Running the Server
 
-[ebitengine_install]: https://ebitengine.org/en/documents/install
+To run the game server, use the following command:
+
+```bash
+go run ./cmd/asteroids -listen [ADDR]
+```
+
+Replace `[ADDR]` with the address and port you'd like the server to listen on.
+For example, to listen on all network interfaces:
+
+```bash
+go run ./cmd/asteroids -listen 0.0.0.0:3000
+```
+
+### 3. Running the Client
+
+To run the game client, use:
+
+```bash
+go run ./cmd/asteroids -connect [ADDR]
+```
+
+Replace `[ADDR]` with the address of the server. For example, if the server is
+running locally:
+
+```bash
+go run ./cmd/asteroids -connect 127.0.0.1:3000
+```
+
+Or, if you're connecting to a VPS:
+
+```bash
+go run ./cmd/asteroids -connect ip.of.your.vps:3000
+```
+
+## How to Play
+
+TODO
 
 ## Resources
 
-I have used the following materials during the development of this project.
+I used the following materials during the development of this project.
 
 - [Networked Physics](https://gafferongames.com/categories/networked-physics)
-- [Sneaky Race Conditions and Granular Locks](https://blogtitle.github.io/sneaky-race-conditions-and-granular-locks)
 - [Network Programming with Go](https://www.amazon.com/Network-Programming-Go-Adam-Woodbeck/dp/1718500882)
