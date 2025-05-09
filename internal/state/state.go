@@ -80,13 +80,17 @@ func (s *State) RemovePlayer(addr string) {
 
 func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 	const (
-		playerAngVel     = 2.5
-		playerAccel      = 500
-		playerMaxSpeed   = 400
-		bulletSpeed      = 1200
-		bulletCooldown   = 200 * time.Millisecond
+		playerAngVel    = 2.5
+		playerAccel     = 500
+		playerMaxSpeed  = 400
+		playerScoreLoss = 10
+
+		bulletSpeed    = 1200
+		bulletCooldown = 200 * time.Millisecond
+
 		asteroidTimeout  = 2 * time.Second
 		asteroidDirRange = 0.75 * math.Pi
+		asteroidScore    = 1
 	)
 
 	dt := delta.Seconds()
@@ -216,13 +220,38 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 			if bullet.Trans.Sub(asteroid.Trans).Magnitude() <= AsteroidWidth {
 				bulletIndicesToRemove = append(bulletIndicesToRemove, ibullet)
 				asteroidIndicesToRemove = append(asteroidIndicesToRemove, iasteroid)
-				s.TotalScore++
+				s.TotalScore += asteroidScore
 			}
 		}
 	}
 	slices.Sort(bulletIndicesToRemove)
 	for _, index := range slices.Backward(bulletIndicesToRemove) {
 		s.Bullets = append(s.Bullets[:index], s.Bullets[index+1:]...)
+	}
+	slices.Sort(asteroidIndicesToRemove)
+	for _, index := range slices.Backward(asteroidIndicesToRemove) {
+		s.Asteroids = append(s.Asteroids[:index], s.Asteroids[index+1:]...)
+	}
+
+	// player-asteroid collision check
+	var playerIndicesToRemove []int
+	asteroidIndicesToRemove = nil
+	for iplayer, player := range s.Players {
+		for iasteroid, asteroid := range s.Asteroids {
+			if player.Trans.Sub(asteroid.Trans).Magnitude() <= AsteroidWidth+PlayerWidth {
+				playerIndicesToRemove = append(playerIndicesToRemove, iplayer)
+				asteroidIndicesToRemove = append(asteroidIndicesToRemove, iasteroid)
+				if s.TotalScore < playerScoreLoss {
+					s.TotalScore = 0
+				} else {
+					s.TotalScore -= playerScoreLoss
+				}
+			}
+		}
+	}
+	slices.Sort(playerIndicesToRemove)
+	for _, index := range slices.Backward(playerIndicesToRemove) {
+		s.Players = append(s.Players[:index], s.Players[index+1:]...)
 	}
 	slices.Sort(asteroidIndicesToRemove)
 	for _, index := range slices.Backward(asteroidIndicesToRemove) {
