@@ -191,6 +191,13 @@ func (sim *Simulation) Draw(screen *ebiten.Image) {
 		op.GeoM.Translate(player.Trans.X-state.PlayerWidth, player.Trans.Y-state.PlayerHeight)
 		text.Draw(screen, fmt.Sprintf("%d", player.ID), &text.GoTextFace{Source: textFaceSource, Size: 50}, op)
 	}
+
+	text.Draw(
+		screen,
+		fmt.Sprintf("Total Score: %d", sim.state.TotalScore),
+		&text.GoTextFace{Source: textFaceSource, Size: 60},
+		&text.DrawOptions{},
+	)
 }
 
 func (sim *Simulation) Update() error {

@@ -39,9 +39,10 @@ type State struct {
 
 	idToAddr map[uint16]string
 
-	Players   []Player
-	Bullets   []Bullet
-	Asteroids []Asteroid
+	TotalScore uint32
+	Players    []Player
+	Bullets    []Bullet
+	Asteroids  []Asteroid
 
 	lastAsteroid time.Time
 }
@@ -215,6 +216,7 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 			if bullet.Trans.Sub(asteroid.Trans).Magnitude() <= AsteroidWidth {
 				bulletIndicesToRemove = append(bulletIndicesToRemove, ibullet)
 				asteroidIndicesToRemove = append(asteroidIndicesToRemove, iasteroid)
+				s.TotalScore++
 			}
 		}
 	}
@@ -474,7 +476,12 @@ func (i *Input) UnmarshalBinary(data []byte) error {
 func (s State) MarshalBinary() ([]byte, error) {
 	var buf bytes.Buffer
 
-	err := binary.Write(&buf, binary.BigEndian, uint16(len(s.Players)))
+	err := binary.Write(&buf, binary.BigEndian, s.TotalScore)
+	if err != nil {
+		return nil, err
+	}
+
+	err = binary.Write(&buf, binary.BigEndian, uint16(len(s.Players)))
 	if err != nil {
 		return nil, err
 	}
@@ -549,8 +556,13 @@ func (s State) MarshalBinary() ([]byte, error) {
 func (s *State) UnmarshalBinary(data []byte) error {
 	r := bytes.NewReader(data)
 
+	err := binary.Read(r, binary.BigEndian, &s.TotalScore)
+	if err != nil {
+		return err
+	}
+
 	var playersLen uint16
-	err := binary.Read(r, binary.BigEndian, &playersLen)
+	err = binary.Read(r, binary.BigEndian, &playersLen)
 	if err != nil {
 		return err
 	}
