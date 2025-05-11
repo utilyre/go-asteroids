@@ -65,6 +65,10 @@ func connectAndRun(ctx context.Context, raddr string) {
 		return
 	}
 	defer func() {
+		if g.Closed() {
+			return
+		}
+
 		err = g.Close(ctx)
 		if err != nil {
 			slog.Error("failed to close game", "error", err)

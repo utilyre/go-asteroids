@@ -118,6 +118,10 @@ func (g *Game) receiveLoop(ctx context.Context) {
 	}
 }
 
+func (g *Game) Closed() bool {
+	return g.sess.Closed()
+}
+
 func (g *Game) Close(ctx context.Context) error {
 	return g.sess.Close(ctx)
 }
