@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"multiplayer/assets"
 	"multiplayer/internal/jitter"
 	"multiplayer/internal/mcp"
 	"multiplayer/internal/state"
@@ -14,26 +15,21 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/examples/resources/fonts"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
 type Simulation struct {
-	imgPlayer *ebiten.Image
-	imgBullet *ebiten.Image
-	imgRock   *ebiten.Image
-
 	ln             *mcp.Listener
-	clients        map[string]clientType
+	clients        map[string]client
 	clientLock     sync.Mutex
 	state          state.State
 	lastStateIndex uint32
 
-	newAddrCh chan string
-	rmAddrCh  chan string
+	remoteJoinedAddrCh chan string
+	remoteLeftAddrCh   chan string
 }
 
-func New(laddr string, imgPlayer, imgBullet, imgRock *ebiten.Image) (*Simulation, error) {
+func Start(laddr string) (*Simulation, error) {
 	ln, err := mcp.Listen(laddr, mcp.WithLogger(slog.Default()))
 	if err != nil {
 		return nil, err
@@ -41,27 +37,24 @@ func New(laddr string, imgPlayer, imgBullet, imgRock *ebiten.Image) (*Simulation
 	slog.Info("bound udp/mcp listener", "address", ln.LocalAddr())
 
 	sim := &Simulation{
-		imgPlayer:      imgPlayer,
-		imgBullet:      imgBullet,
-		imgRock:        imgRock,
-		ln:             ln,
-		clients:        map[string]clientType{},
-		clientLock:     sync.Mutex{},
-		state:          state.InitState(),
-		lastStateIndex: 0,
-		newAddrCh:      make(chan string, 10),
-		rmAddrCh:       make(chan string, 10),
+		ln:                 ln,
+		clients:            map[string]client{},
+		clientLock:         sync.Mutex{},
+		state:              state.Init(),
+		lastStateIndex:     0,
+		remoteJoinedAddrCh: make(chan string, 10),
+		remoteLeftAddrCh:   make(chan string, 10),
 	}
 	go sim.acceptLoop(context.Background())
 	return sim, nil
 }
 
-type clientType struct {
+type client struct {
 	sess   *mcp.Session
 	inputc chan state.Input
 }
 
-func (c clientType) start(ctx context.Context) {
+func (c client) receiveLoop(ctx context.Context) {
 	logger := slog.With("remote", c.sess.RemoteAddr())
 
 	for {
@@ -75,7 +68,7 @@ func (c clientType) start(ctx context.Context) {
 		}
 
 		var buf jitter.Buffer
-		err = buf.UnmarshalBinary(data)
+		err = buf.Decode(bytes.NewReader(data))
 		if err != nil {
 			logger.Warn("failed to unmarshal inputs", "error", err)
 			continue
@@ -109,33 +102,35 @@ func (sim *Simulation) acceptLoop(ctx context.Context) {
 			continue
 		}
 
-		client := clientType{
+		c := client{
 			sess:   sess,
 			inputc: make(chan state.Input, 1),
 		}
 		raddr := sess.RemoteAddr().String()
 		go func() {
-			client.start(context.Background())
+			c.receiveLoop(context.Background())
 
-			// should not sess.Close() since the only reason client.start()
-			// returns is because sess has closed.
+			// The session should not be closed, as the only reason the previous
+			// line would return is if the session were closed.
 
 			sim.clientLock.Lock()
 			delete(sim.clients, raddr)
 			sim.clientLock.Unlock()
-			sim.rmAddrCh <- raddr
+			sim.remoteLeftAddrCh <- raddr
 		}()
 
 		sim.clientLock.Lock()
-		sim.clients[raddr] = client
+		sim.clients[raddr] = c
 		sim.clientLock.Unlock()
-		sim.newAddrCh <- raddr
+		sim.remoteJoinedAddrCh <- raddr
+
+		slog.Info("client joined", "raddr", raddr)
 	}
 }
 
 func (sim *Simulation) Close(ctx context.Context) error {
-	close(sim.rmAddrCh)
-	close(sim.newAddrCh)
+	close(sim.remoteLeftAddrCh)
+	close(sim.remoteJoinedAddrCh)
 	return sim.ln.Close(ctx)
 }
 
@@ -143,27 +138,17 @@ func (sim *Simulation) Layout(int, int) (int, int) {
 	return state.ScreenWidth, state.ScreenHeight
 }
 
-var textFaceSource *text.GoTextFaceSource
-
-func init() {
-	s, err := text.NewGoTextFaceSource(bytes.NewReader(fonts.MPlus1pRegular_ttf))
-	if err != nil {
-		panic(err)
-	}
-	textFaceSource = s
-}
-
 func (sim *Simulation) Draw(screen *ebiten.Image) {
 	for _, bullet := range sim.state.Bullets {
 		var m ebiten.GeoM
 		m.Scale(2, 2)
 		m.Translate(bullet.Trans.X, bullet.Trans.Y)
-		screen.DrawImage(sim.imgBullet, &ebiten.DrawImageOptions{GeoM: m})
+		screen.DrawImage(assets.Bullet, &ebiten.DrawImageOptions{GeoM: m})
 	}
 
 	for _, asteroid := range sim.state.Asteroids {
 		var m ebiten.GeoM
-		bounds := sim.imgRock.Bounds()
+		bounds := assets.Rock.Bounds()
 		m.Translate(-float64(bounds.Dx()/2), -float64(bounds.Dy()/2))
 		m.Rotate(asteroid.Rotation)
 		m.Scale(
@@ -171,12 +156,12 @@ func (sim *Simulation) Draw(screen *ebiten.Image) {
 			state.AsteroidHeight/float64(bounds.Dy()),
 		)
 		m.Translate(asteroid.Trans.X, asteroid.Trans.Y)
-		screen.DrawImage(sim.imgRock, &ebiten.DrawImageOptions{GeoM: m})
+		screen.DrawImage(assets.Rock, &ebiten.DrawImageOptions{GeoM: m})
 	}
 
 	for _, player := range sim.state.Players {
 		var m ebiten.GeoM
-		bounds := sim.imgPlayer.Bounds()
+		bounds := assets.Player.Bounds()
 		m.Translate(-float64(bounds.Dx()/2), -float64(bounds.Dy()/2))
 		m.Rotate(player.Rotation)
 		m.Scale(
@@ -184,19 +169,22 @@ func (sim *Simulation) Draw(screen *ebiten.Image) {
 			state.PlayerHeight/float64(bounds.Dy()),
 		)
 		m.Translate(player.Trans.X, player.Trans.Y)
-		screen.DrawImage(sim.imgPlayer, &ebiten.DrawImageOptions{
+		screen.DrawImage(assets.Player, &ebiten.DrawImageOptions{
 			GeoM: m,
 		})
 
 		op := &text.DrawOptions{}
 		op.GeoM.Translate(player.Trans.X-state.PlayerWidth, player.Trans.Y-state.PlayerHeight)
-		text.Draw(screen, fmt.Sprintf("%d", player.ID), &text.GoTextFace{Source: textFaceSource, Size: 50}, op)
+		text.Draw(screen, fmt.Sprintf("%d", player.ID), &text.GoTextFace{
+			Source: assets.MPlus1pRegular,
+			Size:   50,
+		}, op)
 	}
 
 	text.Draw(
 		screen,
 		fmt.Sprintf("Total Score: %d", sim.state.TotalScore),
-		&text.GoTextFace{Source: textFaceSource, Size: 60},
+		&text.GoTextFace{Source: assets.MPlus1pRegular, Size: 60},
 		&text.DrawOptions{},
 	)
 }
@@ -207,22 +195,22 @@ func (sim *Simulation) Update() error {
 	ctx, cancel := context.WithTimeout(context.Background(), dt)
 	defer cancel()
 
-OUTER:
+ADD_PLAYER_LOOP:
 	for {
 		select {
-		case addr := <-sim.newAddrCh:
+		case addr := <-sim.remoteJoinedAddrCh:
 			sim.state.AddPlayer(addr)
 		default:
-			break OUTER
+			break ADD_PLAYER_LOOP
 		}
 	}
-OUTER2:
+REMOVE_PLAYER_LOOP:
 	for {
 		select {
-		case addr := <-sim.rmAddrCh:
+		case addr := <-sim.remoteLeftAddrCh:
 			sim.state.RemovePlayer(addr)
 		default:
-			break OUTER2
+			break REMOVE_PLAYER_LOOP
 		}
 	}
 
@@ -239,16 +227,11 @@ OUTER2:
 
 	sim.state.Update(dt, inputs)
 
-	data := make([]byte, 2+4)
-	binary.BigEndian.PutUint16(data, 1 /* type = state */)
-	binary.BigEndian.PutUint32(data[2:], sim.lastStateIndex)
-	stateData, err := sim.state.MarshalBinary()
-	if err != nil {
-		slog.Warn("failed to marshal state", "error", err)
-		return nil
-	}
-	data = append(data, stateData...)
-	err = sim.ln.Broadcast(ctx, data)
+	stateBuf := bytes.NewBuffer(make([]byte, 0, 6))
+	_ = binary.Write(stateBuf, binary.BigEndian, uint16(1) /* type = state */)
+	_ = binary.Write(stateBuf, binary.BigEndian, sim.lastStateIndex)
+	sim.state.Encode(stateBuf)
+	err := sim.ln.Broadcast(ctx, stateBuf.Bytes())
 	if errors.Is(err, mcp.ErrClosed) {
 		return ebiten.Termination
 	}

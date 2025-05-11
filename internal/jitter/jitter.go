@@ -1,12 +1,10 @@
 package jitter
 
 import (
+	"bytes"
 	"encoding/binary"
-	"fmt"
 	"multiplayer/internal/state"
 )
-
-const indexedInputSize = state.InputSize + 4
 
 type indexedInput struct {
 	state.Input
@@ -51,50 +49,37 @@ func (buf Buffer) Inputs() []state.Input {
 	return inputs
 }
 
-func (buf Buffer) MarshalBinary() ([]byte, error) {
-	data := make([]byte, 4+indexedInputSize*len(buf.inputs))
-
-	binary.BigEndian.PutUint32(data, uint32(len(buf.inputs)))
-
-	for i, input := range buf.inputs {
-		binary.BigEndian.PutUint32(data[4+indexedInputSize*i:], input.index)
-		inputData, err := input.MarshalBinary()
-		if err != nil {
-			return nil, err
-		}
-		copy(data[4+indexedInputSize*i+4:], inputData)
+func (buf Buffer) Encode(b *bytes.Buffer) {
+	_ = binary.Write(b, binary.BigEndian, uint32(len(buf.inputs)))
+	for _, input := range buf.inputs {
+		_ = binary.Write(b, binary.BigEndian, input.index)
+		input.Encode(b)
 	}
-
-	return data, nil
 }
 
-func (buf *Buffer) UnmarshalBinary(data []byte) error {
-	if l, expected := len(data), 4; l < expected {
-		return fmt.Errorf("data length %d less than %d: %w", l, expected, state.ErrShortData)
-	}
-	numInputs := binary.BigEndian.Uint32(data)
-	if l, expected := len(data), int(4+indexedInputSize*numInputs); l < expected {
-		return fmt.Errorf("data length %d less than %d: %w", l, expected, state.ErrShortData)
+func (buf *Buffer) Decode(r *bytes.Reader) error {
+	var numInputs uint32
+	err := binary.Read(r, binary.BigEndian, &numInputs)
+	if err != nil {
+		return err
 	}
 
-	inputs := make([]indexedInput, numInputs)
+	buf.inputs = make([]indexedInput, numInputs)
 	for i := range numInputs {
-		index := binary.BigEndian.Uint32(data[4+indexedInputSize*i:])
-		var input state.Input
-		err := input.UnmarshalBinary(data[4+indexedInputSize*i+4:])
+		err = binary.Read(r, binary.BigEndian, &buf.inputs[i].index)
 		if err != nil {
 			return err
 		}
-		inputs[i] = indexedInput{
-			Input: input,
-			index: index,
+		err = buf.inputs[i].Decode(r)
+		if err != nil {
+			return err
 		}
 	}
 
-	buf.inputs = inputs
 	if numInputs > 0 {
-		buf.next = inputs[numInputs-1].index + 1
+		buf.next = buf.inputs[numInputs-1].index + 1
 	}
+
 	return nil
 }
 

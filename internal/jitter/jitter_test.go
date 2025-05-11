@@ -1,6 +1,7 @@
 package jitter_test
 
 import (
+	"bytes"
 	"multiplayer/internal/jitter"
 	"multiplayer/internal/state"
 	"testing"
@@ -8,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestJitter_MarshalBinary(t *testing.T) {
+func TestJitter_Encode(t *testing.T) {
 	buf := jitter.NewBufferFrom([]state.Input{
 		{Left: false, Down: false, Up: true, Right: false},
 		{Left: true, Down: false, Up: true, Right: true},
@@ -17,8 +18,8 @@ func TestJitter_MarshalBinary(t *testing.T) {
 		{Left: true, Down: true, Up: false, Right: false},
 		{Left: false, Down: false, Up: false, Right: true},
 	})
-	data, err := buf.MarshalBinary()
-	assert.NoError(t, err)
+	var b bytes.Buffer
+	buf.Encode(&b)
 
 	assert.Equal(t, []byte{
 		0, 0, 0, 6, // numInputs
@@ -34,10 +35,10 @@ func TestJitter_MarshalBinary(t *testing.T) {
 		0b00000011, // input
 		0, 0, 0, 5, // index
 		0b00001000, // input
-	}, data)
+	}, b.Bytes())
 }
 
-func TestJitter_UnmarshalBinary(t *testing.T) {
+func TestJitter_Decode(t *testing.T) {
 	data := []byte{
 		0, 0, 0, 4, // numInputs
 		0, 0, 0, 8, // index
@@ -51,7 +52,7 @@ func TestJitter_UnmarshalBinary(t *testing.T) {
 	}
 
 	var buf jitter.Buffer
-	err := buf.UnmarshalBinary(data)
+	err := buf.Decode(bytes.NewReader(data))
 	assert.NoError(t, err)
 
 	assert.Equal(t, []state.Input{
