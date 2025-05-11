@@ -206,12 +206,11 @@ func writeToWithContext(
 
 func (ln *Listener) Accept(ctx context.Context) (*Session, error) {
 	select {
+	case <-ln.die:
+		return nil, ErrClosed
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case sess, open := <-ln.acceptCh:
-		if !open {
-			return nil, ErrClosed
-		}
+	case sess := <-ln.acceptCh:
 		return sess, nil
 	}
 }
@@ -412,7 +411,6 @@ func (ln *Listener) Close(ctx context.Context) error {
 	ran := false
 	ln.dieOnce.Do(func() {
 		close(ln.die)
-		close(ln.acceptCh)
 		// notify ln.writeLoop to continue and realize ln is closed
 		ln.sessionCond.Broadcast()
 		ran = true
@@ -524,8 +522,9 @@ func (sess *Session) sendLeave(ctx context.Context) error {
 
 func (sess *Session) partialUncheckedClose(ctx context.Context) error {
 	close(sess.die)
+	// TODO: remove this line without breaking anything, especially the write
+	// loop waiting indefinitly as there is no close signal sent from here.
 	close(sess.outbox)
-	close(sess.inbox)
 
 	if sess.dial {
 		err := sess.ln.Close(ctx)

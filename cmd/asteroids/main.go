@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"log/slog"
 	"multiplayer/internal/cli"
 	_ "multiplayer/internal/config"
 	"multiplayer/internal/game"
+	"multiplayer/internal/mcp"
 	"multiplayer/internal/simulation"
 	"os"
 
@@ -66,7 +68,7 @@ func connectAndRun(ctx context.Context, raddr string) {
 	}
 	defer func() {
 		err = g.Close(ctx)
-		if err != nil {
+		if err != nil && !errors.Is(err, mcp.ErrClosed) {
 			slog.Error("failed to close game", "error", err)
 		}
 	}()
