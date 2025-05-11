@@ -1,6 +1,7 @@
 package game
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -63,40 +64,44 @@ func (g *Game) receiveLoop(ctx context.Context) {
 			break
 		}
 		if err != nil {
-			slog.Warn("failed to receive state", "error", err)
+			slog.Warn("failed to receive message", "error", err)
 			continue
 		}
-		if len(data) < 2 {
-			slog.Warn("received data does not contain type")
-			continue
-		}
+		r := bytes.NewReader(data)
 
 		// TODO: this is stupid, come up with an actual protocol
-		typ := binary.BigEndian.Uint16(data)
-		data = data[2:]
+		var typ uint16
+		err = binary.Read(r, binary.BigEndian, &typ)
+		if err != nil {
+			slog.Warn("failed to read message type", "error", err)
+		}
+
 		switch typ {
 		case 0: // input ack
-			if l := len(data); l < 4 {
-				slog.Warn("input acknowledgement is smaller than uint32", "length", l)
+			var index uint32
+			err = binary.Read(r, binary.BigEndian, &index)
+			if err != nil {
+				slog.Warn("failed to read input acknowledgement index", "error", err)
 				continue
 			}
-			index := binary.BigEndian.Uint32(data)
+
 			g.inputBufferLock.Lock()
 			g.inputBuffer.DiscardUntil(index)
 			g.inputBufferLock.Unlock()
 
 		case 1: // state
-			if len(data) < 4 {
-				slog.Warn("state data is smaller than uint32", "length", len(data))
+			var index uint32
+			err = binary.Read(r, binary.BigEndian, &index)
+			if err != nil {
+				slog.Warn("failed to read state index", "error", err)
 				continue
 			}
-			index := binary.BigEndian.Uint32(data)
 			if index <= g.lastStateIndex {
 				continue
 			}
 
 			var s state.State
-			err = s.UnmarshalBinary(data[4:])
+			err = s.Decode(r)
 			if err != nil {
 				slog.Warn("failed to unmarshal state", "error", err)
 				continue
@@ -173,6 +178,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 }
 
 func (g *Game) Update() error {
+	if g.sess.Closed() {
+		return ebiten.Termination
+	}
+
 	input := state.Input{
 		Left:  ebiten.IsKeyPressed(ebiten.KeyA),
 		Down:  ebiten.IsKeyPressed(ebiten.KeyS),
@@ -181,18 +190,12 @@ func (g *Game) Update() error {
 		Space: ebiten.IsKeyPressed(ebiten.KeySpace),
 	}
 
+	var inputsBuf bytes.Buffer
 	g.inputBufferLock.Lock()
 	g.inputBuffer.Append(input)
-	data, err := g.inputBuffer.MarshalBinary()
+	g.inputBuffer.Encode(&inputsBuf)
 	g.inputBufferLock.Unlock()
-	if err != nil {
-		slog.Warn("failed to marshal input buffer", "error", err)
-		return nil
-	}
-	if g.sess.Closed() {
-		return ebiten.Termination
-	}
-	_ = g.sess.TrySend(data)
+	_ = g.sess.TrySend(inputsBuf.Bytes())
 
 	g.snapshotLock.Lock()
 	if !g.nextSnapshot.t.IsZero() {

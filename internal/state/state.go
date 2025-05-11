@@ -3,15 +3,11 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
-	"fmt"
 	"math"
 	"math/rand/v2"
 	"slices"
 	"time"
 )
-
-var ErrShortData = errors.New("short data")
 
 const (
 	ScreenWidth  = 1920
@@ -24,8 +20,6 @@ const (
 	AsteroidHeight = 60
 )
 
-const InputSize = 1
-
 // A zero valued input does not manipulate the state.
 type Input struct {
 	Left, Down, Up, Right bool
@@ -37,6 +31,7 @@ type State struct {
 	nextBulletID   uint32
 	nextAsteroidID uint32
 
+	// TODO: remove once #21 is merged (also think about how auth would work)
 	idToAddr map[uint16]string
 
 	TotalScore uint32
@@ -264,8 +259,6 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 	}
 }
 
-const BulletSize = 4 + 2*Vec2Size
-
 type Bullet struct {
 	ID       uint32
 	Trans    Vec2
@@ -276,8 +269,6 @@ func (b Bullet) Lerp(other Bullet, t float64) Bullet {
 	b.Trans = b.Trans.Lerp(other.Trans, t)
 	return b
 }
-
-const AsteroidSize = 4 + 2*Vec2Size
 
 type Asteroid struct {
 	ID       uint32
@@ -292,8 +283,6 @@ func (a Asteroid) Lerp(other Asteroid, t float64) Asteroid {
 	a.Rotation = rlerp(a.Rotation, other.Rotation, t)
 	return a
 }
-
-const PlayerSize = 4 + 3*Vec2Size + 8
 
 type Player struct {
 	ID       uint16
@@ -381,8 +370,6 @@ func (s State) Lerp(other State, t float64) State {
 	return s
 }
 
-const Vec2Size = 16
-
 type Vec2 struct{ X, Y float64 }
 
 func HeadVec2(angle float64) Vec2 {
@@ -464,7 +451,7 @@ func (v Vec2) Normalize() Vec2 {
 	return v
 }
 
-func (i Input) MarshalBinary() ([]byte, error) {
+func (i Input) Encode(buf *bytes.Buffer) {
 	var b byte
 	if i.Left {
 		b |= 1 << 0
@@ -481,14 +468,15 @@ func (i Input) MarshalBinary() ([]byte, error) {
 	if i.Space {
 		b |= 1 << 4
 	}
-	return []byte{b}, nil
+	_ = buf.WriteByte(b)
 }
 
-func (i *Input) UnmarshalBinary(data []byte) error {
-	if l := len(data); l < InputSize {
-		return fmt.Errorf("data length %d less than %d: %w", l, InputSize, ErrShortData)
+func (i *Input) Decode(r *bytes.Reader) error {
+	b, err := r.ReadByte()
+	if err != nil {
+		return err
 	}
-	b := data[0]
+
 	i.Left = b&(1<<0) != 0
 	i.Down = b&(1<<1) != 0
 	i.Up = b&(1<<2) != 0
@@ -497,89 +485,35 @@ func (i *Input) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-func (s State) MarshalBinary() ([]byte, error) {
-	var buf bytes.Buffer
+func (s State) Encode(buf *bytes.Buffer) {
+	_ = binary.Write(buf, binary.BigEndian, s.TotalScore)
 
-	err := binary.Write(&buf, binary.BigEndian, s.TotalScore)
-	if err != nil {
-		return nil, err
-	}
-
-	err = binary.Write(&buf, binary.BigEndian, uint16(len(s.Players)))
-	if err != nil {
-		return nil, err
-	}
+	_ = binary.Write(buf, binary.BigEndian, uint16(len(s.Players)))
 	for _, player := range s.Players {
-		err = binary.Write(&buf, binary.BigEndian, player.ID)
-		if err != nil {
-			return nil, err
-		}
-		err = binary.Write(&buf, binary.BigEndian, uint16(player.Trans.X))
-		if err != nil {
-			return nil, err
-		}
-		err = binary.Write(&buf, binary.BigEndian, uint16(player.Trans.Y))
-		if err != nil {
-			return nil, err
-		}
-		err = binary.Write(&buf, binary.BigEndian, float32(player.Rotation))
-		if err != nil {
-			return nil, err
-		}
+		_ = binary.Write(buf, binary.BigEndian, player.ID)
+		_ = binary.Write(buf, binary.BigEndian, uint16(player.Trans.X))
+		_ = binary.Write(buf, binary.BigEndian, uint16(player.Trans.Y))
+		_ = binary.Write(buf, binary.BigEndian, float32(player.Rotation))
 	}
 
-	err = binary.Write(&buf, binary.BigEndian, uint16(len(s.Bullets)))
-	if err != nil {
-		return nil, err
-	}
+	_ = binary.Write(buf, binary.BigEndian, uint16(len(s.Bullets)))
 	for _, bullet := range s.Bullets {
-		err = binary.Write(&buf, binary.BigEndian, bullet.ID)
-		if err != nil {
-			return nil, err
-		}
-		err = binary.Write(&buf, binary.BigEndian, uint16(bullet.Trans.X))
-		if err != nil {
-			return nil, err
-		}
-		err = binary.Write(&buf, binary.BigEndian, uint16(bullet.Trans.Y))
-		if err != nil {
-			return nil, err
-		}
-		err = binary.Write(&buf, binary.BigEndian, float32(bullet.Rotation))
-		if err != nil {
-			return nil, err
-		}
+		_ = binary.Write(buf, binary.BigEndian, bullet.ID)
+		_ = binary.Write(buf, binary.BigEndian, uint16(bullet.Trans.X))
+		_ = binary.Write(buf, binary.BigEndian, uint16(bullet.Trans.Y))
+		_ = binary.Write(buf, binary.BigEndian, float32(bullet.Rotation))
 	}
 
-	err = binary.Write(&buf, binary.BigEndian, uint16(len(s.Asteroids)))
-	if err != nil {
-		return nil, err
-	}
+	_ = binary.Write(buf, binary.BigEndian, uint16(len(s.Asteroids)))
 	for _, asteroid := range s.Asteroids {
-		err = binary.Write(&buf, binary.BigEndian, asteroid.ID)
-		if err != nil {
-			return nil, err
-		}
-		err = binary.Write(&buf, binary.BigEndian, uint16(asteroid.Trans.X))
-		if err != nil {
-			return nil, err
-		}
-		err = binary.Write(&buf, binary.BigEndian, uint16(asteroid.Trans.Y))
-		if err != nil {
-			return nil, err
-		}
-		err = binary.Write(&buf, binary.BigEndian, float32(asteroid.Rotation))
-		if err != nil {
-			return nil, err
-		}
+		_ = binary.Write(buf, binary.BigEndian, asteroid.ID)
+		_ = binary.Write(buf, binary.BigEndian, uint16(asteroid.Trans.X))
+		_ = binary.Write(buf, binary.BigEndian, uint16(asteroid.Trans.Y))
+		_ = binary.Write(buf, binary.BigEndian, float32(asteroid.Rotation))
 	}
-
-	return buf.Bytes(), nil
 }
 
-func (s *State) UnmarshalBinary(data []byte) error {
-	r := bytes.NewReader(data)
-
+func (s *State) Decode(r *bytes.Reader) error {
 	err := binary.Read(r, binary.BigEndian, &s.TotalScore)
 	if err != nil {
 		return err

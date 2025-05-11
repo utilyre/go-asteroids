@@ -1,6 +1,7 @@
 package simulation
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -67,7 +68,7 @@ func (c client) receiveLoop(ctx context.Context) {
 		}
 
 		var buf jitter.Buffer
-		err = buf.UnmarshalBinary(data)
+		err = buf.Decode(bytes.NewReader(data))
 		if err != nil {
 			logger.Warn("failed to unmarshal inputs", "error", err)
 			continue
@@ -224,16 +225,11 @@ REMOVE_PLAYER_LOOP:
 
 	sim.state.Update(dt, inputs)
 
-	data := make([]byte, 2+4)
-	binary.BigEndian.PutUint16(data, 1 /* type = state */)
-	binary.BigEndian.PutUint32(data[2:], sim.lastStateIndex)
-	stateData, err := sim.state.MarshalBinary()
-	if err != nil {
-		slog.Warn("failed to marshal state", "error", err)
-		return nil
-	}
-	data = append(data, stateData...)
-	err = sim.ln.Broadcast(ctx, data)
+	stateBuf := bytes.NewBuffer(make([]byte, 0, 6))
+	_ = binary.Write(stateBuf, binary.BigEndian, uint16(1) /* type = state */)
+	_ = binary.Write(stateBuf, binary.BigEndian, sim.lastStateIndex)
+	sim.state.Encode(stateBuf)
+	err := sim.ln.Broadcast(ctx, stateBuf.Bytes())
 	if errors.Is(err, mcp.ErrClosed) {
 		return ebiten.Termination
 	}
