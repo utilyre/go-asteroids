@@ -123,6 +123,8 @@ func (sim *Simulation) acceptLoop(ctx context.Context) {
 		sim.clients[raddr] = c
 		sim.clientLock.Unlock()
 		sim.remoteJoinedAddrCh <- raddr
+
+		slog.Info("client joined", "raddr", raddr)
 	}
 }
 
