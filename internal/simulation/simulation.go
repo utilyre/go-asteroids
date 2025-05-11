@@ -129,8 +129,6 @@ func (sim *Simulation) acceptLoop(ctx context.Context) {
 }
 
 func (sim *Simulation) Close(ctx context.Context) error {
-	close(sim.remoteLeftAddrCh)
-	close(sim.remoteJoinedAddrCh)
 	return sim.ln.Close(ctx)
 }
 
