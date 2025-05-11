@@ -1,13 +1,13 @@
 package game
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	_ "image/png"
 	"log/slog"
+	"multiplayer/assets"
 	"multiplayer/internal/jitter"
 	"multiplayer/internal/mcp"
 	"multiplayer/internal/state"
@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/examples/resources/fonts"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
@@ -25,10 +24,6 @@ type snapshot struct {
 }
 
 type Game struct {
-	imgPlayer *ebiten.Image
-	imgBullet *ebiten.Image
-	imgRock   *ebiten.Image
-
 	sess *mcp.Session
 
 	inputBuffer     jitter.Buffer
@@ -41,16 +36,13 @@ type Game struct {
 	snapshotLock   sync.Mutex
 }
 
-func New(ctx context.Context, raddr string, imgPlayer, imgBullet, imgRock *ebiten.Image) (*Game, error) {
+func New(ctx context.Context, raddr string) (*Game, error) {
 	sess, err := mcp.Dial(ctx, raddr, mcp.WithLogger(slog.Default()))
 	if err != nil {
 		return nil, err
 	}
 
 	g := &Game{
-		imgPlayer:       imgPlayer,
-		imgBullet:       imgBullet,
-		imgRock:         imgRock,
 		sess:            sess,
 		inputBuffer:     jitter.Buffer{},
 		inputBufferLock: sync.Mutex{},
@@ -129,27 +121,17 @@ func (g *Game) Layout(int, int) (int, int) {
 	return state.ScreenWidth, state.ScreenHeight
 }
 
-var textFaceSource *text.GoTextFaceSource
-
-func init() {
-	s, err := text.NewGoTextFaceSource(bytes.NewReader(fonts.MPlus1pRegular_ttf))
-	if err != nil {
-		panic(err)
-	}
-	textFaceSource = s
-}
-
 func (g *Game) Draw(screen *ebiten.Image) {
 	for _, bullet := range g.state.Bullets {
 		var m ebiten.GeoM
 		m.Scale(2, 2)
 		m.Translate(bullet.Trans.X, bullet.Trans.Y)
-		screen.DrawImage(g.imgBullet, &ebiten.DrawImageOptions{GeoM: m})
+		screen.DrawImage(assets.Bullet, &ebiten.DrawImageOptions{GeoM: m})
 	}
 
 	for _, asteroid := range g.state.Asteroids {
 		var m ebiten.GeoM
-		bounds := g.imgRock.Bounds()
+		bounds := assets.Rock.Bounds()
 		m.Translate(-float64(bounds.Dx()/2), -float64(bounds.Dy()/2))
 		m.Rotate(asteroid.Rotation)
 		m.Scale(
@@ -157,12 +139,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			state.AsteroidHeight/float64(bounds.Dy()),
 		)
 		m.Translate(asteroid.Trans.X, asteroid.Trans.Y)
-		screen.DrawImage(g.imgRock, &ebiten.DrawImageOptions{GeoM: m})
+		screen.DrawImage(assets.Rock, &ebiten.DrawImageOptions{GeoM: m})
 	}
 
 	for _, player := range g.state.Players {
 		var m ebiten.GeoM
-		bounds := g.imgPlayer.Bounds()
+		bounds := assets.Player.Bounds()
 		m.Translate(-float64(bounds.Dx()/2), -float64(bounds.Dy()/2))
 		m.Rotate(player.Rotation)
 		m.Scale(
@@ -170,19 +152,22 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			state.PlayerHeight/float64(bounds.Dy()),
 		)
 		m.Translate(player.Trans.X, player.Trans.Y)
-		screen.DrawImage(g.imgPlayer, &ebiten.DrawImageOptions{
+		screen.DrawImage(assets.Player, &ebiten.DrawImageOptions{
 			GeoM: m,
 		})
 
 		op := &text.DrawOptions{}
 		op.GeoM.Translate(player.Trans.X-state.PlayerWidth, player.Trans.Y-state.PlayerHeight)
-		text.Draw(screen, fmt.Sprintf("%d", player.ID), &text.GoTextFace{Source: textFaceSource, Size: 50}, op)
+		text.Draw(screen, fmt.Sprintf("%d", player.ID), &text.GoTextFace{
+			Source: assets.MPlus1pRegular,
+			Size:   50,
+		}, op)
 	}
 
 	text.Draw(
 		screen,
 		fmt.Sprintf("Total Score: %d", g.state.TotalScore),
-		&text.GoTextFace{Source: textFaceSource, Size: 60},
+		&text.GoTextFace{Source: assets.MPlus1pRegular, Size: 60},
 		&text.DrawOptions{},
 	)
 }
