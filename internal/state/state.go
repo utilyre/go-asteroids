@@ -245,10 +245,12 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 		}
 	}
 	slices.Sort(bulletIndicesToRemove)
+	bulletIndicesToRemove = slices.Compact(bulletIndicesToRemove)
 	for _, index := range slices.Backward(bulletIndicesToRemove) {
 		s.Bullets = append(s.Bullets[:index], s.Bullets[index+1:]...)
 	}
 	slices.Sort(asteroidIndicesToRemove)
+	asteroidIndicesToRemove = slices.Compact(asteroidIndicesToRemove)
 	for _, index := range slices.Backward(asteroidIndicesToRemove) {
 		s.Asteroids = append(s.Asteroids[:index], s.Asteroids[index+1:]...)
 	}
@@ -271,10 +273,12 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 		}
 	}
 	slices.Sort(playerIndicesToRemove)
+	playerIndicesToRemove = slices.Compact(playerIndicesToRemove)
 	for _, index := range slices.Backward(playerIndicesToRemove) {
 		s.Players = append(s.Players[:index], s.Players[index+1:]...)
 	}
 	slices.Sort(asteroidIndicesToRemove)
+	asteroidIndicesToRemove = slices.Compact(asteroidIndicesToRemove)
 	for _, index := range slices.Backward(asteroidIndicesToRemove) {
 		s.Asteroids = append(s.Asteroids[:index], s.Asteroids[index+1:]...)
 	}
