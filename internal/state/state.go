@@ -87,6 +87,7 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 		asteroidTimeout  = 2 * time.Second
 		asteroidDirRange = 0.75 * math.Pi
 		asteroidScore    = 1
+		asteroidSpeed    = 100
 	)
 
 	dt := delta.Seconds()
@@ -95,6 +96,7 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 		player := &s.Players[i]
 		input := inputs[s.idToAddr[player.ID]]
 
+		// player controls
 		forward := 0.0
 		rotation := 0.0
 		if input.Down {
@@ -109,15 +111,20 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 		if input.Right {
 			rotation += 1
 		}
-
 		if input.Space {
-			player.Rotation = wrapAngle(playerAngVelShooting*rotation*dt + player.Rotation)
+			rotation *= playerAngVelShooting
 		} else {
-			player.Rotation = wrapAngle(playerAngVel*rotation*dt + player.Rotation)
+			rotation *= playerAngVel
 		}
+		player.Rotation = wrapAngle(rotation*dt + player.Rotation)
 		player.Accel = HeadVec2(0.5*math.Pi + player.Rotation).Mul(playerAccel * forward)
-		//                            π/2 - (-a) = π/2 + a
+
+		// player movement
 		player.Trans = player.Accel.Mul(0.5 * dt * dt).Add(player.Vel.Mul(dt)).Add(player.Trans)
+		player.Vel = player.Accel.Mul(dt).Add(player.Vel)
+
+		// player confinement
+		// TODO: perfectly stop at the edge (including sprite)
 		if player.Trans.X < 0 {
 			player.Trans.X = 0
 			player.Vel.X = 0
@@ -132,11 +139,11 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 			player.Trans.Y = ScreenHeight
 			player.Vel.Y = 0
 		}
-		player.Vel = player.Accel.Mul(dt).Add(player.Vel)
 		if player.Vel.Magnitude() > playerMaxSpeed {
 			player.Vel = player.Vel.Normalize().Mul(playerMaxSpeed)
 		}
 
+		// player shooting
 		if input.Space && time.Since(player.lastBullet) > bulletCooldown {
 			s.Bullets = append(s.Bullets, Bullet{
 				ID:       s.nextBulletID,
@@ -151,7 +158,12 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 	var bulletIndicesToRemove []int
 	for i := range len(s.Bullets) {
 		bullet := &s.Bullets[i]
+
+		// bullet movement
 		bullet.Trans = HeadVec2(1.5*math.Pi + bullet.Rotation).Mul(bulletSpeed * dt).Add(bullet.Trans)
+
+		// bullet disappearance
+		// TODO: remove when perfectly out of world
 		if bullet.Trans.X < 0 || bullet.Trans.X > ScreenWidth || bullet.Trans.Y < 0 || bullet.Trans.Y > ScreenHeight {
 			bulletIndicesToRemove = append(bulletIndicesToRemove, i)
 		}
@@ -160,15 +172,18 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 		s.Bullets = append(s.Bullets[:index], s.Bullets[index+1:]...)
 	}
 
+	// spawn asteroids randomly at the edges of the world
 	if time.Since(s.lastAsteroid) > asteroidTimeout {
 		const (
-			top    = iota // up = -π/2
-			bottom        // down = π/2
-			left          // left = -π
-			right         // right = 0
+			//               directions:
+			top    = iota //   up     = -π/2
+			bottom        //   down   =  π/2
+			left          //   left   = -π
+			right         //   right  =  0
 		)
 		var trans Vec2
 		var dir float64
+		// TODO: spawn perfectly at the edge
 		switch rand.N(4) {
 		case top:
 			trans.X = ScreenWidth * rand.Float64()
@@ -191,7 +206,7 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 		s.Asteroids = append(s.Asteroids, Asteroid{
 			ID:       s.nextAsteroidID,
 			Trans:    trans,
-			Vel:      HeadVec2(dir).Mul(100),
+			Vel:      HeadVec2(dir).Mul(asteroidSpeed),
 			AngVel:   math.Pi * (rand.Float64() - 0.5),
 			Rotation: 2 * math.Pi * (rand.Float64() - 0.5),
 		})
@@ -202,8 +217,12 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 	var asteroidIndicesToRemove []int
 	for i := range len(s.Asteroids) {
 		asteroid := &s.Asteroids[i]
+
+		// asteroid movement
 		asteroid.Trans = asteroid.Vel.Mul(dt).Add(asteroid.Trans)
 		asteroid.Rotation = wrapAngle(asteroid.AngVel*dt + asteroid.Rotation)
+
+		// asteroid confinement
 		if asteroid.Trans.X < 0 || asteroid.Trans.X > ScreenWidth || asteroid.Trans.Y < 0 || asteroid.Trans.Y > ScreenHeight {
 			asteroidIndicesToRemove = append(asteroidIndicesToRemove, i)
 		}
@@ -213,6 +232,7 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 	}
 
 	// bullet-asteroid collision check
+	// TODO: fix radius stuff
 	bulletIndicesToRemove = nil
 	asteroidIndicesToRemove = nil
 	for ibullet, bullet := range s.Bullets {
@@ -234,6 +254,7 @@ func (s *State) Update(delta time.Duration, inputs map[string]Input) {
 	}
 
 	// player-asteroid collision check
+	// TODO: fix radius stuff
 	var playerIndicesToRemove []int
 	asteroidIndicesToRemove = nil
 	for iplayer, player := range s.Players {
