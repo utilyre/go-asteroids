@@ -311,7 +311,7 @@ func (p Player) Lerp(other Player, t float64) Player {
 	return p
 }
 
-func InitState() State {
+func Init() State {
 	return State{
 		nextPlayerID:   1,
 		nextBulletID:   1,

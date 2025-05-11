@@ -36,7 +36,7 @@ type Game struct {
 	snapshotLock   sync.Mutex
 }
 
-func New(ctx context.Context, raddr string) (*Game, error) {
+func Start(ctx context.Context, raddr string) (*Game, error) {
 	sess, err := mcp.Dial(ctx, raddr, mcp.WithLogger(slog.Default()))
 	if err != nil {
 		return nil, err

@@ -19,16 +19,16 @@ import (
 
 type Simulation struct {
 	ln             *mcp.Listener
-	clients        map[string]clientType
+	clients        map[string]client
 	clientLock     sync.Mutex
 	state          state.State
 	lastStateIndex uint32
 
-	newAddrCh chan string
-	rmAddrCh  chan string
+	remoteJoinedAddrCh chan string
+	remoteLeftAddrCh   chan string
 }
 
-func New(laddr string) (*Simulation, error) {
+func Start(laddr string) (*Simulation, error) {
 	ln, err := mcp.Listen(laddr, mcp.WithLogger(slog.Default()))
 	if err != nil {
 		return nil, err
@@ -36,24 +36,24 @@ func New(laddr string) (*Simulation, error) {
 	slog.Info("bound udp/mcp listener", "address", ln.LocalAddr())
 
 	sim := &Simulation{
-		ln:             ln,
-		clients:        map[string]clientType{},
-		clientLock:     sync.Mutex{},
-		state:          state.InitState(),
-		lastStateIndex: 0,
-		newAddrCh:      make(chan string, 10),
-		rmAddrCh:       make(chan string, 10),
+		ln:                 ln,
+		clients:            map[string]client{},
+		clientLock:         sync.Mutex{},
+		state:              state.Init(),
+		lastStateIndex:     0,
+		remoteJoinedAddrCh: make(chan string, 10),
+		remoteLeftAddrCh:   make(chan string, 10),
 	}
 	go sim.acceptLoop(context.Background())
 	return sim, nil
 }
 
-type clientType struct {
+type client struct {
 	sess   *mcp.Session
 	inputc chan state.Input
 }
 
-func (c clientType) start(ctx context.Context) {
+func (c client) receiveLoop(ctx context.Context) {
 	logger := slog.With("remote", c.sess.RemoteAddr())
 
 	for {
@@ -101,33 +101,33 @@ func (sim *Simulation) acceptLoop(ctx context.Context) {
 			continue
 		}
 
-		client := clientType{
+		c := client{
 			sess:   sess,
 			inputc: make(chan state.Input, 1),
 		}
 		raddr := sess.RemoteAddr().String()
 		go func() {
-			client.start(context.Background())
+			c.receiveLoop(context.Background())
 
-			// should not sess.Close() since the only reason client.start()
-			// returns is because sess has closed.
+			// The session should not be closed, as the only reason the previous
+			// line would return is if the session were closed.
 
 			sim.clientLock.Lock()
 			delete(sim.clients, raddr)
 			sim.clientLock.Unlock()
-			sim.rmAddrCh <- raddr
+			sim.remoteLeftAddrCh <- raddr
 		}()
 
 		sim.clientLock.Lock()
-		sim.clients[raddr] = client
+		sim.clients[raddr] = c
 		sim.clientLock.Unlock()
-		sim.newAddrCh <- raddr
+		sim.remoteJoinedAddrCh <- raddr
 	}
 }
 
 func (sim *Simulation) Close(ctx context.Context) error {
-	close(sim.rmAddrCh)
-	close(sim.newAddrCh)
+	close(sim.remoteLeftAddrCh)
+	close(sim.remoteJoinedAddrCh)
 	return sim.ln.Close(ctx)
 }
 
@@ -192,22 +192,22 @@ func (sim *Simulation) Update() error {
 	ctx, cancel := context.WithTimeout(context.Background(), dt)
 	defer cancel()
 
-OUTER:
+ADD_PLAYER_LOOP:
 	for {
 		select {
-		case addr := <-sim.newAddrCh:
+		case addr := <-sim.remoteJoinedAddrCh:
 			sim.state.AddPlayer(addr)
 		default:
-			break OUTER
+			break ADD_PLAYER_LOOP
 		}
 	}
-OUTER2:
+REMOVE_PLAYER_LOOP:
 	for {
 		select {
-		case addr := <-sim.rmAddrCh:
+		case addr := <-sim.remoteLeftAddrCh:
 			sim.state.RemovePlayer(addr)
 		default:
-			break OUTER2
+			break REMOVE_PLAYER_LOOP
 		}
 	}
 

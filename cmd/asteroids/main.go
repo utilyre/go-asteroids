@@ -36,7 +36,7 @@ func main() {
 }
 
 func listenAndSimulate(ctx context.Context, addr string) {
-	sim, err := simulation.New(addr)
+	sim, err := simulation.Start(addr)
 	if err != nil {
 		slog.Error("failed to instantiate simulation", "error", err)
 		return
@@ -59,7 +59,7 @@ func listenAndSimulate(ctx context.Context, addr string) {
 }
 
 func connectAndRun(ctx context.Context, raddr string) {
-	g, err := game.New(ctx, raddr)
+	g, err := game.Start(ctx, raddr)
 	if err != nil {
 		slog.Error("failed to initialize game", "error", err)
 		return
