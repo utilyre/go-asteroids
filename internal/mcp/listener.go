@@ -522,6 +522,8 @@ func (sess *Session) sendLeave(ctx context.Context) error {
 
 func (sess *Session) partialUncheckedClose(ctx context.Context) error {
 	close(sess.die)
+	// TODO: remove this line without breaking anything, especially the write
+	// loop waiting indefinitly as there is no close signal sent from here.
 	close(sess.outbox)
 
 	if sess.dial {
