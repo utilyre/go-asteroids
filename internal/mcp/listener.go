@@ -20,13 +20,15 @@ import (
 var (
 	ErrClosed       = errors.New("use of closed network connection")
 	ErrNegativeSize = errors.New("provision of negative value as size")
+	ErrNilValue     = errors.New("provision of nil value")
 )
 
 const version byte = 1
 
 const (
-	flagJoin uint16 = 1 << iota
-	flagLeave
+	flagSyn uint16 = 1 << iota
+	flagAck
+	flagClose
 )
 
 // how is this any different from net.PacketConn?
@@ -36,12 +38,15 @@ const (
 // 3. sessions (multiplex incoming messages)
 
 type Listener struct {
-	options
-	local net.Addr
+	dial     bool
+	dataSize int
+	logger   *slog.Logger
+	local    net.Addr
 
 	sessions    map[string]*Session // maps raddr to session
 	sessionCond sync.Cond           // notifies _addition_ of new sessions
 	acceptCh    chan *Session
+	dialCh      chan net.Addr
 
 	conn    net.PacketConn
 	die     chan struct{}
@@ -55,9 +60,10 @@ func (ln *Listener) LocalAddr() net.Addr {
 type Option func(opts *options) error
 
 type options struct {
-	dial     bool
-	dataSize int
-	logger   *slog.Logger
+	dial       bool
+	dataSize   int
+	logger     *slog.Logger
+	listenFunc func(laddr string) (net.PacketConn, error)
 }
 
 func WithDataSize(dataSize int) Option {
@@ -85,11 +91,25 @@ func withDial(dial bool) Option {
 	}
 }
 
+func WithListenFunc(listenFunc func(laddr string) (net.PacketConn, error)) Option {
+	return func(opts *options) error {
+		if listenFunc == nil {
+			return fmt.Errorf("listenFunc: %w", ErrNilValue)
+		}
+
+		opts.listenFunc = listenFunc
+		return nil
+	}
+}
+
 func Listen(laddr string, opts ...Option) (*Listener, error) {
 	o := options{
 		dial:     false,
 		dataSize: 512 - headerSize, // avoid fragmentation
 		logger:   slog.New(slog.DiscardHandler),
+		listenFunc: func(laddr string) (net.PacketConn, error) {
+			return net.ListenPacket("udp", laddr)
+		},
 	}
 	var optErrs []error
 	for _, opt := range opts {
@@ -99,18 +119,21 @@ func Listen(laddr string, opts ...Option) (*Listener, error) {
 		return nil, err
 	}
 
-	conn, err := net.ListenPacket("udp", laddr)
+	conn, err := o.listenFunc(laddr)
 	if err != nil {
 		return nil, err
 	}
 
 	// NOTE: keep fields exhaustive
 	ln := &Listener{
-		options:     o,
+		dial:        o.dial,
+		dataSize:    o.dataSize,
+		logger:      o.logger,
 		local:       conn.LocalAddr(),
 		sessions:    map[string]*Session{},
 		sessionCond: sync.Cond{L: &sync.Mutex{}},
 		acceptCh:    make(chan *Session),
+		dialCh:      make(chan net.Addr),
 		conn:        conn,
 		die:         make(chan struct{}),
 		dieOnce:     sync.Once{},
@@ -132,22 +155,16 @@ func Dial(ctx context.Context, raddr string, opts ...Option) (*Session, error) {
 		return nil, err
 	}
 
-	datagram := Datagram{
-		Version: version,
-		Flags:   flagJoin,
-		Data:    nil,
-	}
-	b, err := datagram.MarshalBinary()
+	err = ln.sendFlags(ctx, remote, flagSyn)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = writeToWithContext(ctx, ln.logger, ln.conn, b, remote)
-	if err != nil {
-		return nil, err
+	select {
+	case <-ln.dialCh:
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
-
-	// TODO: retry if not acknowledged
 
 	sess := newSession(true, ln.local, remote, ln)
 	sess.ln = ln
@@ -160,23 +177,17 @@ func Dial(ctx context.Context, raddr string, opts ...Option) (*Session, error) {
 	return sess, nil
 }
 
-// please note that the context will affect all the writes happening at the
-// time of this function running.
-func writeToWithContext(
-	ctx context.Context,
-	logger *slog.Logger,
-	conn net.PacketConn,
-	b []byte,
-	remote net.Addr,
-) (n int, err error) {
+// Please note that ctx affects all simultaneous write calls on ln.conn at the
+// execution time of sendFlags.
+func (ln *Listener) sendFlags(ctx context.Context, remote net.Addr, flags uint16) (err error) {
 	if deadline, ok := ctx.Deadline(); ok {
-		err := conn.SetWriteDeadline(deadline)
+		err := ln.conn.SetWriteDeadline(deadline)
 		if err != nil {
-			return 0, err
+			return err
 		}
 	}
 	defer func() { // runs after local done channel is closed
-		err = errors.Join(err, conn.SetWriteDeadline(time.Time{}))
+		err = errors.Join(err, ln.conn.SetWriteDeadline(time.Time{}))
 	}()
 
 	done := make(chan struct{})
@@ -185,23 +196,29 @@ func writeToWithContext(
 		select {
 		case <-done:
 		case <-ctx.Done():
-			err := conn.SetWriteDeadline(time.Now())
+			err := ln.conn.SetWriteDeadline(time.Now())
 			if err != nil {
-				logger.WarnContext(ctx, "failed to cancel write",
+				ln.logger.WarnContext(ctx, "failed to cancel write",
 					"raddr", remote,
 					"error", err)
 			}
 		}
 	}()
 
-	n, err = conn.WriteTo(b, remote)
-	if errors.Is(err, os.ErrDeadlineExceeded) {
-		return 0, ctx.Err()
+	dg := Datagram{
+		Version: version,
+		Flags:   flags,
 	}
+	data, err := dg.MarshalBinary()
 	if err != nil {
-		return 0, err
+		return err
 	}
-	return n, nil
+
+	_, err = ln.conn.WriteTo(data, remote)
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return ctx.Err()
+	}
+	return err
 }
 
 func (ln *Listener) Accept(ctx context.Context) (*Session, error) {
@@ -350,14 +367,9 @@ func (ln *Listener) handleDatagram(ctx context.Context, remote net.Addr, datagra
 	if datagram.Version != version {
 		return fmt.Errorf("version %d: version is not supported", datagram.Version)
 	}
-	if datagram.Flags&flagJoin != 0 && datagram.Flags&flagLeave != 0 {
-		return fmt.Errorf("flags %08b: unknown state", datagram.Flags)
-	}
 
 	switch {
-	case datagram.Flags&flagJoin != 0:
-		// TODO: acknowledge join
-
+	case datagram.Flags&flagSyn != 0:
 		sess := newSession(false, ln.local, remote, ln)
 		ln.sessionCond.L.Lock()
 		if _, exists := ln.sessions[remote.String()]; exists {
@@ -368,9 +380,18 @@ func (ln *Listener) handleDatagram(ctx context.Context, remote net.Addr, datagra
 		ln.sessionCond.L.Unlock()
 		ln.sessionCond.Broadcast()
 
+		// using context.Background() so that no writes are affected
+		err := ln.sendFlags(context.Background(), remote, flagSyn|flagAck)
+		if err != nil {
+			return err
+		}
+
 		ln.acceptCh <- sess
 
-	case datagram.Flags&flagLeave != 0:
+	case datagram.Flags&(flagSyn|flagAck) != 0:
+		ln.dialCh <- remote
+
+	case datagram.Flags&flagClose != 0:
 		ln.sessionCond.L.Lock()
 		if _, exists := ln.sessions[remote.String()]; !exists {
 			ln.sessionCond.L.Unlock()
@@ -503,16 +524,7 @@ func (sess *Session) TrySend(data []byte) bool {
 }
 
 func (sess *Session) sendLeave(ctx context.Context) error {
-	datagram := Datagram{
-		Version: version,
-		Flags:   flagLeave,
-		Data:    nil,
-	}
-	data, err := datagram.MarshalBinary()
-	if err != nil {
-		return err
-	}
-	_, err = writeToWithContext(ctx, sess.ln.logger, sess.ln.conn, data, sess.remote)
+	err := sess.ln.sendFlags(ctx, sess.remote, flagClose)
 	if err != nil {
 		return err
 	}
